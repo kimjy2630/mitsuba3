@@ -10,4 +10,6 @@ add_plugin(stokes     stokes.cpp)
 add_plugin(volpath    volpath.cpp)
 add_plugin(volpathmis volpathmis.cpp)
 
+add_plugin(adatest    adatest.cpp)
+
 set(MI_PLUGIN_TARGETS "${MI_PLUGIN_TARGETS}" PARENT_SCOPE)
