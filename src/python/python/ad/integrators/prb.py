@@ -65,8 +65,7 @@ class PRBIntegrator(RBIntegrator):
                state_in: Optional[mi.Spectrum],
                active: mi.Bool,
                **kwargs # Absorbs unused arguments
-    ) -> Tuple[mi.Spectrum,
-               mi.Bool, mi.Spectrum]:
+    ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         """
         See ``ADIntegrator.sample()`` for a description of this interface and
         the role of the various parameters and return values.
@@ -104,10 +103,11 @@ class PRBIntegrator(RBIntegrator):
         loop.set_max_iterations(self.max_depth)
 
         while loop(active):
+            active_next = mi.Bool(active)
+
             # Compute a surface interaction that tracks derivatives arising
             # from differentiable shape parameters (position, normals, etc.)
             # In primal mode, this is just an ordinary ray tracing operation.
-
             with dr.resume_grad(when=not primal):
                 si = scene.ray_intersect(ray,
                                          ray_flags=mi.RayFlags.All,
@@ -118,6 +118,10 @@ class PRBIntegrator(RBIntegrator):
 
             # ---------------------- Direct emission ----------------------
 
+            # Hide the environment emitter if necessary
+            if self.hide_emitters:
+                active_next &= ~(dr.eq(depth, 0) & ~si.is_valid())
+
             # Compute MIS weight for emitter sample from previous bounce
             ds = mi.DirectionSample3f(scene, si=si, ref=prev_si)
 
@@ -127,12 +131,12 @@ class PRBIntegrator(RBIntegrator):
             )
 
             with dr.resume_grad(when=not primal):
-                Le = β * mis * ds.emitter.eval(si)
+                Le = β * mis * ds.emitter.eval(si, active_next)
 
             # ---------------------- Emitter sampling ----------------------
 
             # Should we continue tracing to reach one more vertex?
-            active_next = (depth + 1 < self.max_depth) & si.is_valid()
+            active_next &= (depth + 1 < self.max_depth) & si.is_valid()
 
             # Is emitter sampling even possible on the current vertex?
             active_em = active_next & mi.has_flag(bsdf.flags(), mi.BSDFFlags.Smooth)
@@ -152,7 +156,7 @@ class PRBIntegrator(RBIntegrator):
                     dr.disable_grad(ds.d)
 
                 # Evaluate BSDF * cos(theta) differentiably
-                wo = si.to_local(ds.d)
+                wo = dr.detach(si.to_local(ds.d))
                 bsdf_value_em, bsdf_pdf_em = bsdf.eval_pdf(bsdf_ctx, si, wo, active_em)
                 mis_em = dr.select(ds.delta, 1, mis_weight(ds.pdf, bsdf_pdf_em))
                 Lr_dir = β * mis_em * bsdf_value_em * em_weight
@@ -207,7 +211,7 @@ class PRBIntegrator(RBIntegrator):
                     # via multiple importance sampling)
 
                     # Recompute 'wo' to propagate derivatives to cosine term
-                    wo = si.to_local(ray.d)
+                    wo = dr.detach(si.to_local(ray.d))
 
                     # Re-evaluate BSDF * cos(theta) differentiably
                     bsdf_val = bsdf.eval(bsdf_ctx, si, wo, active_next)
@@ -248,6 +252,7 @@ class PRBIntegrator(RBIntegrator):
         return (
             L if primal else δL, # Radiance/differential radiance
             dr.neq(depth, 0),    # Ray validity flag for alpha blending
+            [],                  # Empty typle of AOVs
             L                    # State for the differential phase
         )
 

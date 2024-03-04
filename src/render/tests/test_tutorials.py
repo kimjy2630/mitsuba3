@@ -21,7 +21,7 @@ def run_notebook(notebook_path, tmp_dir=None):
     if tmp_dir is None:
         tmp_dir = dirname(notebook_path)
 
-    with open(notebook_path) as f:
+    with open(notebook_path, encoding='utf-8') as f:
         nb = nbformat.read(f, as_version=4)
 
     # Check the variants required in this notebook are enabled, otherwise skip
@@ -31,13 +31,13 @@ def run_notebook(notebook_path, tmp_dir=None):
             if v not in mi.variants():
                 pytest.skip(f'variant {v} is not enabled')
 
-    proc = ExecutePreprocessor(timeout=600, kernel_name='python3')
+    proc = ExecutePreprocessor(timeout=900, kernel_name='python3')
     proc.allow_errors = True
 
     proc.preprocess(nb, {'metadata': {'path': dirname(notebook_path)}})
     output_path = join(tmp_dir, '{}_all_output.ipynb'.format(nb_name))
 
-    with open(output_path, mode='wt') as f:
+    with open(output_path, mode='wt', encoding='utf-8') as f:
         nbformat.write(nb, f)
 
     return nb

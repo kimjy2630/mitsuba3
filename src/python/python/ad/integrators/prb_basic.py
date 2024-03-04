@@ -52,8 +52,7 @@ class BasicPRBIntegrator(RBIntegrator):
                state_in: Optional[mi.Spectrum],
                active: mi.Bool,
                **kwargs # Absorbs unused arguments
-    ) -> Tuple[mi.Spectrum,
-               mi.Bool, mi.Spectrum]:
+    ) -> Tuple[mi.Spectrum, mi.Bool, List[mi.Float], mi.Spectrum]:
         """
         See ``ADIntegrator.sample()`` for a description of this interface and
         the role of the various parameters and return values.
@@ -80,20 +79,26 @@ class BasicPRBIntegrator(RBIntegrator):
                        state=lambda: (sampler, ray, depth, L, δL, β, active))
 
         while loop(active):
+            active_next = mi.Bool(active)
+
             # ---------------------- Direct emission ----------------------
 
             # Compute a surface interaction that tracks derivatives arising
             # from differentiable shape parameters (position, normals, etc.)
             # In primal mode, this is just an ordinary ray tracing operation.
-
             with dr.resume_grad(when=not primal):
                 si = scene.ray_intersect(ray)
 
-                # Differentiable evaluation of intersected emitter / envmap
-                Le = β * si.emitter(scene).eval(si)
+            # Hide the environment emitter if necessary
+            if self.hide_emitters:
+                active_next &= ~(dr.eq(depth, 0) & ~si.is_valid())
+
+            # Differentiable evaluation of intersected emitter / envmap
+            with dr.resume_grad(when=not primal):
+                Le = β * si.emitter(scene).eval(si, active_next)
 
             # Should we continue tracing to reach one more vertex?
-            active_next = (depth + 1 < self.max_depth) & si.is_valid()
+            active_next &= (depth + 1 < self.max_depth) & si.is_valid()
 
             # Get the BSDF. Potentially computes texture-space differentials.
             bsdf = si.bsdf(ray)
@@ -125,7 +130,7 @@ class BasicPRBIntegrator(RBIntegrator):
                     # tracking enabled.
 
                     # Recompute 'wo' to propagate derivatives to cosine term
-                    wo = si.to_local(ray.d)
+                    wo = dr.detach(si.to_local(ray.d))
 
                     # Re-evaluate BSDF * cos(theta) differentiably
                     bsdf_val = bsdf.eval(bsdf_ctx, si, wo, active_next)
@@ -155,6 +160,7 @@ class BasicPRBIntegrator(RBIntegrator):
         return (
             L if primal else δL, # Radiance/differential radiance
             dr.neq(depth, 0),    # Ray validity flag for alpha blending
+            [],                  # Empty typle of AOVs
             L                    # State the for differential phase
         )
 

@@ -130,10 +130,6 @@ In *polarized* rendering modes, the material automatically switches to a polariz
 implementation of the underlying Fresnel equations that quantify the reflectance and
 transmission.
 
-.. note::
-
-    Dispersion is currently unsupported but will be enabled in a future release.
-
 Instead of specifying numerical values for the indices of refraction, Mitsuba 3
 comes with a list of presets that can be specified with the :paramtype:`material`
 parameter:
@@ -319,8 +315,15 @@ public:
             /* The Stokes reference frame vector of this matrix lies perpendicular
                to the plane of reflection. */
             Vector3f n(0, 0, 1);
-            Vector3f s_axis_in  = dr::normalize(dr::cross(n, -wo_hat)),
-                     s_axis_out = dr::normalize(dr::cross(n, wi_hat));
+            Vector3f s_axis_in  = dr::cross(n, -wo_hat);
+            Vector3f s_axis_out = dr::cross(n, wi_hat);
+
+            // Singularity when the input & output are collinear with the normal
+            Mask collinear = dr::all(dr::eq(s_axis_in, Vector3f(0)));
+            s_axis_in  = dr::select(collinear, Vector3f(1, 0, 0),
+                                               dr::normalize(s_axis_in));
+            s_axis_out = dr::select(collinear, Vector3f(1, 0, 0),
+                                               dr::normalize(s_axis_out));
 
             /* Rotate in/out reference vector of `weight` s.t. it aligns with the
                implicit Stokes bases of -wo_hat & wi_hat. */
@@ -341,7 +344,9 @@ public:
                     Sampling weights should be computed accordingly. */
                 if constexpr (dr::is_diff_v<Float>) {
                     if (dr::grad_enabled(r_i)) {
-                        weight = dr::select(selected_r, r_i / dr::detach(r_i), t_i / dr::detach(t_i));
+                        Float r_diff = dr::replace_grad(Float(1.f), r_i / dr::detach(r_i));
+                        Float t_diff = dr::replace_grad(Float(1.f), t_i / dr::detach(t_i));
+                        weight = dr::select(selected_r, r_diff, t_diff);
                     }
                 }
             } else if (has_reflection || has_transmission) {

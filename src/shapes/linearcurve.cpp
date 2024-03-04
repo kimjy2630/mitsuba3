@@ -95,8 +95,8 @@ points and increasing radii::
 
         <shape type="linearcurve">
             <transform name="to_world">
-                <scale value="2"/>
                 <translate x="1" y="0" z="0"/>
+                <scale value="2"/>
             </transform>
             <string name="filename" type="curves.txt"/>
         </shape>
@@ -108,13 +108,17 @@ points and increasing radii::
             'to_world': mi.ScalarTransform4f.scale([2, 2, 2]).translate([1, 0, 0]),
             'filename': 'curves.txt'
         },
+
+.. note:: The backfaces of the curves are culled. It is therefore impossible to
+          intersect the curve with a ray that's origin is inside of the curve.
  */
 
 template <typename Float, typename Spectrum>
 class LinearCurve final : public Shape<Float, Spectrum> {
 public:
-    MI_IMPORT_BASE(Shape, m_to_world, m_to_object, m_is_instance, initialize,
-                   mark_dirty, get_children_string, parameters_grad_enabled)
+    MI_IMPORT_BASE(Shape, m_to_world, m_to_object, m_is_instance, m_shape_type,
+                   initialize, mark_dirty, get_children_string,
+                   parameters_grad_enabled)
     MI_IMPORT_TYPES()
 
     using typename Base::ScalarIndex;
@@ -301,6 +305,9 @@ public:
             util::time_string((float) timer.value())
         );
 
+        m_shape_type = ShapeType::LinearCurve;
+        dr::set_attr(this, "shape_type", m_shape_type);
+
         initialize();
     }
 
@@ -365,7 +372,7 @@ public:
         Base::traverse(callback);
         callback->put_parameter("control_point_count", m_control_point_count, +ParamFlags::NonDifferentiable);
         callback->put_parameter("segment_indices",     m_indices,             +ParamFlags::NonDifferentiable);
-        callback->put_parameter("control_points",      m_control_points,       ParamFlags::Differentiable | ParamFlags::Discontinuous);
+        callback->put_parameter("control_points",      m_control_points,      +ParamFlags::NonDifferentiable);
     }
 
     void parameters_changed(const std::vector<std::string> &keys) override {
@@ -427,10 +434,6 @@ public:
         build_input.curveArray.endcapFlags          = OPTIX_CURVE_ENDCAP_DEFAULT;
     }
 #endif
-
-    bool is_linear_curve() const override {
-        return true;
-    }
 
     ScalarBoundingBox3f bbox() const override {
         return m_bbox;

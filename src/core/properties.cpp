@@ -8,6 +8,9 @@
 #include <map>
 #include <sstream>
 #include <cstring>
+#include <climits>
+
+#include <drjit/tensor.h>
 
 #include <mitsuba/core/logger.h>
 #include <mitsuba/core/properties.h>
@@ -16,10 +19,12 @@
 
 NAMESPACE_BEGIN(mitsuba)
 
-using Float       = typename Properties::Float;
-using Color3f     = typename Properties::Color3f;
-using Array3f     = typename Properties::Array3f;
-using Transform4f = typename Properties::Transform4f;
+using Float         = typename Properties::Float;
+using Color3f       = typename Properties::Color3f;
+using Array3f       = typename Properties::Array3f;
+using Transform3f   = typename Properties::Transform3f;
+using Transform4f   = typename Properties::Transform4f;
+using TensorHandle  = typename Properties::TensorHandle;
 
 using VariantType = variant<
     bool,
@@ -27,7 +32,9 @@ using VariantType = variant<
     Float,
     Array3f,
     std::string,
+    Transform3f,
     Transform4f,
+    TensorHandle,
     Color3f,
     NamedReference,
     ref<Object>,
@@ -53,10 +60,12 @@ struct SortKey {
 
         if (std::isdigit(*a_ptr) && std::isdigit(*b_ptr)) {
             char *a_end, *b_end;
-            long l1 = std::strtol(a_ptr, &a_end, 10);
-            long l2 = std::strtol(b_ptr, &b_end, 10);
+            long long l1 = std::strtoll(a_ptr, &a_end, 10);
+            long long l2 = std::strtoll(b_ptr, &b_end, 10);
             if (a_end == (a.c_str() + a.size()) &&
-                b_end == (b.c_str() + b.size()))
+                b_end == (b.c_str() + b.size()) &&
+                l1 != LLONG_MAX && l2 != LLONG_MAX &&
+                !((l1 == l2) && (a.size() != b.size()))) // catch leading zeros case (e.g. 001 vs 01))
                 return l1 < l2;
         }
 
@@ -82,6 +91,23 @@ T get_impl(const Iterator &it) {
     return (T const &) it->second.data;
 }
 
+
+/**
+ * \brief Specialization to gracefully handle if user supplies either a 3x3 or 4x4 transform.
+ * Historically, we didn't directly support Transform3 properties so want to maintain
+ * backwards compatibility
+ */
+template<>
+Transform3f get_impl<Transform3f, Transform4f>(const Iterator &it) {
+    if (!it->second.data.template is<Transform3f>() && !it->second.data.template is<Transform4f>())
+        Throw("The property \"%s\" has the wrong type (expected <%s> or <%s>, is <%s>)",
+              it->first, typeid(Transform3f).name(), typeid(Transform4f).name(), it->second.data.type().name());
+    it->second.queried = true;
+    if (it->second.data.template is<Transform4f>())
+        return ((Transform4f const &)it->second.data).extract();
+    return (Transform3f const &) it->second.data;
+}
+
 template <typename T>
 T get_routing(const Iterator &it) {
     if constexpr (dr::is_static_array_v<T>) {
@@ -92,6 +118,13 @@ T get_routing(const Iterator &it) {
         else
             return (T) get_impl<Array3f>(it);
     }
+
+    if constexpr (std::is_same_v<T, TensorHandle>)
+        return get_impl<TensorHandle>(it);
+
+    if constexpr (std::is_same_v<T, Transform<Point<float, 3>>> ||
+                  std::is_same_v<T, Transform<Point<double, 3>>>)
+        return (T) get_impl<Transform3f, Transform4f>(it);
 
     if constexpr (std::is_same_v<T, Transform<Point<float, 4>>> ||
                   std::is_same_v<T, Transform<Point<double, 4>>>)
@@ -171,7 +204,9 @@ T Properties::get(const std::string &name, const T &def_val) const {
 
 DEFINE_PROPERTY_SETTER(bool,         set_bool)
 DEFINE_PROPERTY_SETTER(int64_t,      set_long)
+DEFINE_PROPERTY_SETTER(Transform3f,  set_transform3f)
 DEFINE_PROPERTY_SETTER(Transform4f,  set_transform)
+DEFINE_PROPERTY_SETTER(TensorHandle, set_tensor_handle)
 DEFINE_PROPERTY_SETTER(Color3f,      set_color)
 DEFINE_PROPERTY_ACCESSOR(std::string,    string,  set_string,          string)
 DEFINE_PROPERTY_ACCESSOR(NamedReference, ref,     set_named_reference, named_reference)
@@ -210,7 +245,9 @@ namespace {
         Type operator()(const Float &) { return Type::Float; }
         Type operator()(const Array3f &) { return Type::Array3f; }
         Type operator()(const std::string &) { return Type::String; }
-        Type operator()(const Transform4f &) { return Type::Transform; }
+        Type operator()(const Transform3f &) { return Type::Transform3f; }
+        Type operator()(const Transform4f &) { return Type::Transform4f; }
+        Type operator()(const TensorHandle &) { return Type::Tensor; }
         Type operator()(const Color3f &) { return Type::Color; }
         Type operator()(const NamedReference &) { return Type::NamedReference; }
         Type operator()(const ref<Object> &) { return Type::Object; }
@@ -226,7 +263,9 @@ namespace {
         void operator()(const Float &f) { os << f; }
         void operator()(const Array3f &t) { os << t; }
         void operator()(const std::string &s) { os << "\"" << s << "\""; }
+        void operator()(const Transform3f &t) { os << t; }
         void operator()(const Transform4f &t) { os << t; }
+        void operator()(const TensorHandle &t) { os << t.get(); }
         void operator()(const Color3f &t) { os << t; }
         void operator()(const NamedReference &nr) { os << "\"" << (const std::string &) nr << "\""; }
         void operator()(const ref<Object> &o) { os << o->to_string(); }
@@ -531,8 +570,11 @@ EXPORT_PROPERTY_ACCESSOR(T(Vector<float, 3>))
 EXPORT_PROPERTY_ACCESSOR(T(Vector<double, 3>))
 EXPORT_PROPERTY_ACCESSOR(T(Color<float, 3>))
 EXPORT_PROPERTY_ACCESSOR(T(Color<double, 3>))
+EXPORT_PROPERTY_ACCESSOR(T(Transform<Point<float, 3>>))
+EXPORT_PROPERTY_ACCESSOR(T(Transform<Point<double, 3>>))
 EXPORT_PROPERTY_ACCESSOR(T(Transform<Point<float, 4>>))
 EXPORT_PROPERTY_ACCESSOR(T(Transform<Point<double, 4>>))
+EXPORT_PROPERTY_ACCESSOR(T(Properties::TensorHandle))
 EXPORT_PROPERTY_ACCESSOR(T(std::string))
 EXPORT_PROPERTY_ACCESSOR(T(ref<Object>))
 #if defined(__APPLE__)

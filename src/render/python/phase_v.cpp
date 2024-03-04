@@ -38,6 +38,14 @@ public:
         PYBIND11_OVERRIDE_PURE(std::string, PhaseFunction, to_string);
     }
 
+    void traverse(TraversalCallback *cb) override {
+        PYBIND11_OVERRIDE(void, PhaseFunction, traverse, cb);
+    }
+
+    void parameters_changed(const std::vector<std::string> &keys) override {
+        PYBIND11_OVERRIDE(void, PhaseFunction, parameters_changed, keys);
+    }
+
     using PhaseFunction::m_flags;
     using PhaseFunction::m_components;
 };
@@ -84,9 +92,11 @@ MI_PY_EXPORT(PhaseFunction) {
     py::class_<PhaseFunctionContext>(m, "PhaseFunctionContext", D(PhaseFunctionContext))
         .def(py::init<Sampler*, TransportMode>(), "sampler"_a,
                 "mode"_a = TransportMode::Radiance, D(PhaseFunctionContext, PhaseFunctionContext))
-        .def_method(PhaseFunctionContext, reverse)
-        .def_field(PhaseFunctionContext, sampler, D(PhaseFunctionContext, sampler))
+        .def_field(PhaseFunctionContext, mode,      D(PhaseFunctionContext, mode))
+        .def_field(PhaseFunctionContext, sampler,   D(PhaseFunctionContext, sampler))
+        .def_field(PhaseFunctionContext, type_mask, D(PhaseFunctionContext, type_mask))
         .def_field(PhaseFunctionContext, component, D(PhaseFunctionContext, component))
+        .def_method(PhaseFunctionContext, reverse)
         .def_repr(PhaseFunctionContext);
 
     auto phase =
