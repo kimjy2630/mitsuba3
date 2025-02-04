@@ -4,7 +4,7 @@
 #include <mitsuba/core/spectrum.h>
 #include <mitsuba/core/traits.h>
 #include <mitsuba/render/fwd.h>
-#include <drjit/vcall.h>
+#include <drjit/call.h>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -12,6 +12,9 @@ template <typename Float, typename Spectrum>
 class MI_EXPORT_LIB Medium : public Object {
 public:
     MI_IMPORT_TYPES(PhaseFunction, Sampler, Scene, Texture);
+
+    /// Destructor
+    ~Medium();
 
     /// Intersects a ray with the medium's bounding box
     virtual std::tuple<Mask, Float, Float>
@@ -97,13 +100,11 @@ public:
     /// Return a human-readable representation of the Medium
     std::string to_string() const override = 0;
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::Medium)
-
     MI_DECLARE_CLASS()
+
 protected:
     Medium();
     Medium(const Properties &props);
-    virtual ~Medium();
 
 protected:
     ref<PhaseFunction> m_phase_function;
@@ -120,17 +121,17 @@ NAMESPACE_END(mitsuba)
 //! @{ \name Dr.Jit support for packets of Medium pointers
 // -----------------------------------------------------------------------
 
-DRJIT_VCALL_TEMPLATE_BEGIN(mitsuba::Medium)
-    DRJIT_VCALL_GETTER(phase_function, const typename Class::PhaseFunction*)
-    DRJIT_VCALL_GETTER(use_emitter_sampling, bool)
-    DRJIT_VCALL_GETTER(is_homogeneous, bool)
-    DRJIT_VCALL_GETTER(has_spectral_extinction, bool)
-    DRJIT_VCALL_METHOD(get_majorant)
-    DRJIT_VCALL_METHOD(intersect_aabb)
-    DRJIT_VCALL_METHOD(sample_interaction)
-    DRJIT_VCALL_METHOD(transmittance_eval_pdf)
-    DRJIT_VCALL_METHOD(get_scattering_coefficients)
-DRJIT_VCALL_TEMPLATE_END(mitsuba::Medium)
+MI_CALL_TEMPLATE_BEGIN(Medium)
+    DRJIT_CALL_GETTER(phase_function)
+    DRJIT_CALL_GETTER(use_emitter_sampling)
+    DRJIT_CALL_GETTER(is_homogeneous)
+    DRJIT_CALL_GETTER(has_spectral_extinction)
+    DRJIT_CALL_METHOD(get_majorant)
+    DRJIT_CALL_METHOD(intersect_aabb)
+    DRJIT_CALL_METHOD(sample_interaction)
+    DRJIT_CALL_METHOD(transmittance_eval_pdf)
+    DRJIT_CALL_METHOD(get_scattering_coefficients)
+MI_CALL_TEMPLATE_END(Medium)
 
 //! @}
 // -----------------------------------------------------------------------

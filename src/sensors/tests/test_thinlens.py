@@ -16,7 +16,7 @@ def create_camera(o, d, fov=34, fov_axis="x", s_open=1.5, s_close=5, aperture=0.
         "fov_axis": fov_axis,
         "shutter_open": s_open,
         "shutter_close": s_close,
-        "to_world": mi.ScalarTransform4f.look_at(
+        "to_world": mi.ScalarTransform4f().look_at(
             origin=o,
             target=t,
             up=[0, 1, 0]
@@ -51,7 +51,7 @@ def test01_create(variant_scalar_rgb, origin, direction, s_open, s_time):
     assert camera.needs_aperture_sample()
     assert camera.bbox() == mi.BoundingBox3f(origin, origin)
     assert dr.allclose(camera.world_transform().matrix,
-                       mi.Transform4f.look_at(origin, mi.Vector3f(origin) + direction, [0, 1, 0]).matrix)
+                       mi.Transform4f().look_at(origin, mi.Vector3f(origin) + direction, [0, 1, 0]).matrix)
 
 
 @pytest.mark.parametrize("origin", origins)
@@ -99,7 +99,7 @@ def test02_sample_ray(variants_vec_spectral, origin, direction, aperture_rad, fo
 
     ray_centered, _ = cam.sample_ray(time, wav_sample, pos_sample, [0.5, 0.5])
 
-    trafo = mi.Transform4f.look_at(origin, mi.Vector3f(origin) + mi.Vector3f(direction), [0, 1, 0])
+    trafo = mi.Transform4f().look_at(origin, mi.Vector3f(origin) + mi.Vector3f(direction), [0, 1, 0])
     tmp = aperture_rad * mi.warp.square_to_uniform_disk_concentric(aperture_sample)
     aperture_v = trafo @ mi.Vector3f(tmp.x, tmp.y, 0)
 
@@ -177,7 +177,7 @@ def test03_sample_ray_diff(variants_vec_spectral, origin, direction, aperture_ra
 
     ray_centered, _ = cam.sample_ray(time, wav_sample, pos_sample, [0.5, 0.5])
 
-    trafo = mi.Transform4f.look_at(origin, mi.Vector3f(origin) + mi.Vector3f(direction), [0, 1, 0])
+    trafo = mi.Transform4f().look_at(origin, mi.Vector3f(origin) + mi.Vector3f(direction), [0, 1, 0])
     tmp = mi.warp.square_to_uniform_disk_concentric(aperture_sample)
     aperture_v = trafo @ (aperture_rad * mi.Vector3f(tmp.x, tmp.y, 0))
 
@@ -230,7 +230,7 @@ def test05_spectrum_sampling(variants_vec_spectral):
         "aperture_radius": 1.0,
     })
     wavelengths, _ =  camera.sample_wavelengths(dr.zeros(mi.SurfaceInteraction3f), mi.Float([0.1, 0.4, 0.9]))
-    assert (dr.all_nested((wavelengths >= mi.MI_CIE_MIN) & (wavelengths <= mi.MI_CIE_MAX)))
+    assert dr.all((wavelengths >= mi.MI_CIE_MIN) & (wavelengths <= mi.MI_CIE_MAX), axis=None)
 
     # Check custom SRF wavelength sampling
     camera = mi.load_dict({
@@ -242,7 +242,7 @@ def test05_spectrum_sampling(variants_vec_spectral):
         }
     })
     wavelengths, _ =  camera.sample_wavelengths(dr.zeros(mi.SurfaceInteraction3f), mi.Float([0.1, 0.4, 0.9]))
-    assert (dr.all_nested((wavelengths >= 1200) & (wavelengths <= 1400)))
+    assert dr.all((wavelengths >= 1200) & (wavelengths <= 1400), axis=None)
 
     # Check error if double SRF is defined
     with pytest.raises(RuntimeError, match=r'Sensor\(\)'):

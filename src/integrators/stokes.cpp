@@ -107,19 +107,19 @@ public:
                                                  current_basis,
                                                  target_basis) * spec;
 
-            auto const &stokes = spec.entry(0);
             for (int i = 0; i < 4; ++i) {
                 Color3f rgb;
                 if constexpr (is_monochromatic_v<Spectrum>) {
-                    rgb = stokes[i].x();
+                    rgb = spec.entry(i, 0).x();
                 } else if constexpr (is_rgb_v<Spectrum>) {
-                    rgb = stokes[i];
+                    rgb = spec.entry(i, 0);
                 } else {
                     static_assert(is_spectral_v<Spectrum>);
                     /// Note: this assumes that sensor used sample_rgb_spectrum() to generate 'ray.wavelengths'
                     auto pdf = pdf_rgb_spectrum(ray.wavelengths);
-                    UnpolarizedSpectrum spec = stokes[i] * dr::select(dr::neq(pdf, 0.f), dr::rcp(pdf), 0.f);
-                    rgb = spectrum_to_srgb(spec, ray.wavelengths, active);
+                    UnpolarizedSpectrum _spec =
+                        spec.entry(i, 0) * dr::select(pdf != 0.f, dr::rcp(pdf), 0.f);
+                    rgb = spectrum_to_srgb(_spec, ray.wavelengths, active);
                 }
 
                 *aovs++ = rgb.r(); *aovs++ = rgb.g(); *aovs++ = rgb.b();

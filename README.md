@@ -76,17 +76,25 @@ We provide pre-compiled binary wheels via PyPI. Installing Mitsuba this way is a
 pip install mitsuba
 ```
 
-on the command line. The Python package includes four variants by default:
+on the command line. The Python package includes thirteen variants by default:
 
-- ``scalar_spectral``
 - ``scalar_rgb``
+- ``scalar_spectral``
+- ``scalar_spectral_polarized``
 - ``llvm_ad_rgb``
+- ``llvm_ad_mono``
+- ``llvm_ad_mono_polarized``
+- ``llvm_ad_spectral``
+- ``llvm_ad_spectral_polarized``
 - ``cuda_ad_rgb``
+- ``cuda_ad_mono``
+- ``cuda_ad_mono_polarized``
+- ``cuda_ad_spectral``
+- ``cuda_ad_spectral_polarized``
 
-The first two perform classic one-ray-at-a-time simulation using either a RGB
-or spectral color representation, while the latter two can be used for inverse
-rendering on the CPU or GPU. To access additional variants, you will need to
-compile a custom version of Dr.Jit using CMake. Please see the
+The scalar variants perform one-ray-at-a-time simulations, while the LLVM and CUDA 
+variants can be used for inverse rendering on the CPU or GPU respectively. To access additional 
+variants, you will need to compile a custom version of Dr.Jit using CMake. Please see the
 [documentation](https://mitsuba.readthedocs.io/en/latest/src/developer_guide/compiling.html)
 for details on this.
 

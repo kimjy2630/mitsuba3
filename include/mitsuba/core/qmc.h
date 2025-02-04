@@ -33,6 +33,9 @@ public:
      */
     RadicalInverse(size_t max_base = 8161, int scramble = -1);
 
+    /// Default destructor
+    virtual ~RadicalInverse() = default;
+
     /// Return the number of prime bases for which precomputed tables are available
     size_t bases() const { return m_base_count; }
 
@@ -76,7 +79,7 @@ public:
         Float factor = Float(1.f),
               recip(base.recip);
 
-        auto active = dr::neq(index, 0u);
+        auto active = index != 0u;
 
         while (dr::any(active)) {
             auto active_f = dr::reinterpret_array<dr::mask_t<Float>>(active);
@@ -84,7 +87,7 @@ public:
             dr::masked(factor, active_f) = factor * recip;
             dr::masked(value, active) = (value - next) * divisor + index;
             index = next;
-            active = dr::neq(index, 0u);
+            active = (index != 0u);
         }
 
         return dr::minimum(dr::OneMinusEpsilon<Float>, Float(value) * factor);
@@ -112,7 +115,7 @@ public:
         Float factor(1.f),
               recip(base.recip);
 
-        auto active = dr::neq(index, 0);
+        auto active = index != 0;
 
         while (dr::any(active)) {
             auto active_f = dr::reinterpret_array<dr::mask_t<Float>>(active);
@@ -122,7 +125,7 @@ public:
             dr::masked(value, active) =
                 value * divisor + (dr::gather<UInt64, 2>(perm, digit, active) & mask);
             index = next;
-            active = dr::neq(index, 0);
+            active = index != 0;
         }
 
         Float correction(base.recip * (Float) perm[0] / ((Float) 1 - base.recip));
@@ -154,8 +157,6 @@ private:
     void invert_permutation(uint32_t i);
 
     MI_DECLARE_CLASS()
-protected:
-    virtual ~RadicalInverse() = default;
 
 private:
 #if defined(_MSC_VER)
@@ -217,21 +218,35 @@ template <typename UInt, typename Float = dr::float_array_t<UInt>>
 Float sobol_2(UInt index, UInt scramble = 0) {
     if constexpr (std::is_same_v<dr::scalar_t<Float>, double>) {
         UInt v = 1ULL << 52;
-        dr::Loop<dr::mask_t<UInt>> loop("sobol_2", v, scramble, index);
-        while(loop(dr::neq(index, 0U))) {
-            dr::masked(scramble, dr::eq(index & 1U, 1U)) ^= v;
-            index >>= 1;
-            v ^= v >> 1;
-        }
+
+        std::tie(v, scramble, index) = dr::while_loop(
+            std::make_tuple(v, scramble, index),
+            [](const UInt&, UInt&, UInt& index) {
+                return index != 0U;
+            },
+            [](UInt& v, UInt& scramble, UInt& index) {
+                dr::masked(scramble, ((index & 1U) == 1U)) ^= v;
+                index >>= 1;
+                v ^= v >> 1;
+            },
+            "sobol_2");
+
         return dr::reinterpret_array<Float>(dr::sr<12>(scramble) | 0x3ff0000000000000ull) - 1.0;
     } else {
         UInt v = 1U << 31;
-        dr::Loop<dr::mask_t<UInt>> loop("sobol_2", v, scramble, index);
-        while(loop(dr::neq(index, 0U))) {
-            dr::masked(scramble, dr::eq(index & 1U, 1U)) ^= v;
-            index >>= 1;
-            v ^= v >> 1;
-        }
+
+        std::tie(v, scramble, index) = dr::while_loop(
+            std::make_tuple(v, scramble, index),
+            [](const UInt&, const UInt&, const UInt& index) {
+                return index != 0U;
+            },
+            [](UInt& v, UInt& scramble, UInt& index) {
+                dr::masked(scramble, ((index & 1U) == 1U)) ^= v;
+                index >>= 1;
+                v ^= v >> 1;
+            },
+            "sobol_2");
+
         return Float(scramble) / Float(1ULL << 32);
     }
 }

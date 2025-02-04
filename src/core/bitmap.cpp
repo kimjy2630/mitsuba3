@@ -11,7 +11,7 @@
 #include <thread>
 
 #include <nanothread/nanothread.h>
-#include <drjit/half.h>
+#include <drjit-core/half.h>
 
 /* libpng */
 #include <png.h>
@@ -177,6 +177,11 @@ void Bitmap::rebuild_struct(size_t channel_count, const std::vector<std::string>
                 for (size_t i = 0; i < channel_count; ++i)
                     channels.push_back(tfm::format("ch%i", i));
             } else {
+                if (channel_names.size() != channel_count)
+                    Throw("Bitmap::rebuild_struct(): expected %u channel "
+                          "names, but only got %u!",
+                          channel_count, channel_names.size());
+
                 std::vector<std::string> channels_sorted = channel_names;
                 std::sort(channels_sorted.begin(), channels_sorted.end());
                 for (size_t i = 1; i < channels_sorted.size(); ++i) {
@@ -341,9 +346,9 @@ void Bitmap::resample(
         Throw("Bitmap::resample(): Incompatible source and target bitmaps!");
 
     if (temp && (pixel_format() != temp->pixel_format() ||
-                 component_format() != temp->component_format() ||
+                (component_format() != temp->component_format()) ||
                  channel_count() != temp->channel_count() ||
-                 temp->size() != Vector2u(target->width(), height())))
+                 dr::all(temp->size() != Vector2u(target->width(), height()))))
         Throw("Bitmap::resample(): Incompatible temporary bitmap specified!");
 
     switch (m_component_format) {
@@ -407,7 +412,7 @@ ref<Bitmap> Bitmap::convert(PixelFormat pixel_format,
 }
 
 void Bitmap::convert(Bitmap *target) const {
-    if (m_size != target->size())
+    if (dr::all(m_size != target->size()))
         Throw("Bitmap::convert(): Incompatible target size!"
               " This: %s vs target: %s)", m_size, target->size());
 
@@ -808,21 +813,22 @@ void Bitmap::write(Stream *stream, FileFormat format, int quality) const {
 
 void Bitmap::write_async(const fs::path &path, FileFormat format, int quality) const {
     this->inc_ref();
-    Task *task = dr::do_async([path, format, quality, this](){
+    Task *task = dr::do_async([path, format, quality, this]() {
         write(path, format, quality);
-        this->dec_ref();
+        if (this->dec_ref())
+            delete this;
     });
     Thread::register_task(task);
 }
 
 bool Bitmap::operator==(const Bitmap &bitmap) const {
-    if (m_pixel_format != bitmap.m_pixel_format ||
+    if (dr::all(m_pixel_format != bitmap.m_pixel_format ||
         m_component_format != bitmap.m_component_format ||
         m_size != bitmap.m_size ||
         m_srgb_gamma != bitmap.m_srgb_gamma ||
         m_premultiplied_alpha != bitmap.m_premultiplied_alpha ||
         *m_struct != *bitmap.m_struct ||
-        m_metadata != bitmap.m_metadata)
+        m_metadata != bitmap.m_metadata))
         return false;
     return memcmp(uint8_data(), bitmap.uint8_data(), buffer_size()) == 0;
 }
@@ -1132,7 +1138,7 @@ void Bitmap::read_exr(Stream *stream) {
         Vector2i sampling(channel.xSampling, channel.ySampling);
         Imf::Slice slice;
 
-        if (sampling == Vector2i(1)) {
+        if (dr::all(sampling == Vector2i(1))) {
             // This is a full resolution channel. Load the ordinary way
             slice = Imf::Slice(pixel_type, (char *) (ptr + field.offset),
                                pixel_stride, row_stride);
@@ -1244,7 +1250,7 @@ void Bitmap::read_exr(Stream *stream) {
         };
 
         switch (m_component_format) {
-            case Struct::Type::Float16: convert((dr::half *) m_data.get()); break;
+            case Struct::Type::Float16: convert((dr::half *)    m_data.get()); break;
             case Struct::Type::Float32: convert((float *)       m_data.get()); break;
             case Struct::Type::UInt32:  convert((uint32_t*)     m_data.get()); break;
             default: Throw("Internal error!");
@@ -1315,7 +1321,7 @@ void Bitmap::read_exr(Stream *stream) {
         };
 
         switch (m_component_format) {
-            case Struct::Type::Float16: convert((dr::half *) m_data.get()); break;
+            case Struct::Type::Float16: convert((dr::half *)    m_data.get()); break;
             case Struct::Type::Float32: convert((float *)       m_data.get()); break;
             case Struct::Type::UInt32:  convert((uint32_t*)     m_data.get()); break;
             default: Throw("Internal error!");
@@ -1718,6 +1724,8 @@ void Bitmap::read_png(Stream *stream) {
         if (bit_depth == 16)
             png_set_swap(png_ptr); // Swap the byte order on little endian machines
     #endif
+
+    png_set_interlace_handling(png_ptr);
 
     // Update the information based on the transformations
     png_read_update_info(png_ptr, info_ptr);

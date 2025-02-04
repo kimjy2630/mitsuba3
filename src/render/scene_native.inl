@@ -20,7 +20,7 @@ MI_VARIANT void Scene<Float, Spectrum>::accel_init_cpu(const Properties &props) 
         if (!m_shapes.empty()) {
             std::unique_ptr<uint32_t[]> data(new uint32_t[m_shapes.size()]);
             for (size_t i = 0; i < m_shapes.size(); i++)
-                data[i] = jit_registry_get_id(JitBackend::LLVM, m_shapes[i]);
+                data[i] = jit_registry_id(m_shapes[i]);
             s.shapes_registry_ids
                 = dr::load<DynamicBuffer<UInt32>>(data.get(), m_shapes.size());
         } else {
@@ -228,12 +228,12 @@ Scene<Float, Spectrum>::ray_intersect_preliminary_cpu(const Ray3f &ray,
 
         UInt32 inst_index = UInt32::steal(out[5]);
 
-        Mask hit = active && dr::neq(t, ray.maxt);
+        Mask hit = active && (t != ray.maxt);
 
         pi.t = dr::select(hit, t, dr::Infinity<Float>);
 
         // Set si.instance and si.shape
-        Mask hit_inst = hit && dr::neq(inst_index, ((uint32_t)-1));
+        Mask hit_inst = hit && (inst_index != ((uint32_t)-1));
         UInt32 index = dr::select(hit_inst, inst_index, pi.shape_index);
 
         ShapePtr shape = dr::gather<UInt32>(s->shapes_registry_ids, index, hit);
@@ -302,7 +302,7 @@ Scene<Float, Spectrum>::ray_test_cpu(const Ray3f &ray,
 
         jit_llvm_ray_trace(func_v.index(), scene_v.index(), 1, in, out);
 
-        return active && dr::neq(Float::steal(out[0]), ray.maxt);
+        return active && (Float::steal(out[0]) != ray.maxt);
     }
 }
 

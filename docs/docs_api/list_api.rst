@@ -4,6 +4,20 @@
 
 .. autoclass:: mitsuba.ArgParser
 
+.. autoclass:: mitsuba.ArrayXb
+
+.. autoclass:: mitsuba.ArrayXd
+
+.. autoclass:: mitsuba.ArrayXf
+
+.. autoclass:: mitsuba.ArrayXi
+
+.. autoclass:: mitsuba.ArrayXi64
+
+.. autoclass:: mitsuba.ArrayXu
+
+.. autoclass:: mitsuba.ArrayXu64
+
 .. autoclass:: mitsuba.AtomicFloat
 
 .. autoclass:: mitsuba.BSDF
@@ -27,22 +41,6 @@
 .. autoclass:: mitsuba.BoundingBox3f
 
 .. autoclass:: mitsuba.BoundingSphere3f
-
-.. autoclass:: mitsuba.ChainScalarTransform3d
-
-.. autoclass:: mitsuba.ChainScalarTransform3f
-
-.. autoclass:: mitsuba.ChainScalarTransform4d
-
-.. autoclass:: mitsuba.ChainScalarTransform4f
-
-.. autoclass:: mitsuba.ChainTransform3d
-
-.. autoclass:: mitsuba.ChainTransform3f
-
-.. autoclass:: mitsuba.ChainTransform4d
-
-.. autoclass:: mitsuba.ChainTransform4f
 
 .. autoclass:: mitsuba.Class
 
@@ -136,8 +134,6 @@
 
 .. autoclass:: mitsuba.Logger
 
-.. autoclass:: mitsuba.Loop
-
 .. autofunction:: mitsuba.MI_AUTHORS
 
 .. autofunction:: mitsuba.MI_CIE_D65_NORMALIZATION
@@ -205,6 +201,8 @@
 .. autoclass:: mitsuba.MemoryStream
 
 .. autoclass:: mitsuba.Mesh
+
+.. autoclass:: mitsuba.MeshPtr
 
 .. autoclass:: mitsuba.MicrofacetDistribution
 
@@ -292,6 +290,8 @@
 
 .. autoclass:: mitsuba.Ray2f
 
+.. autoclass:: mitsuba.Ray3d
+
 .. autoclass:: mitsuba.Ray3f
 
 .. autoclass:: mitsuba.RayDifferential3f
@@ -301,6 +301,8 @@
 .. autoclass:: mitsuba.ReconstructionFilter
 
 .. autoclass:: mitsuba.Resampler
+
+.. autoclass:: mitsuba.SGGXPhaseFunctionParams
 
 .. autoclass:: mitsuba.Sampler
 
@@ -566,13 +568,13 @@
 
 .. autoclass:: mitsuba.ad.UniformDistr
 
-.. autoclass:: mitsuba.ad.common.ADIntegrator
+.. autoclass:: mitsuba.ad.integrators.common.ADIntegrator
 
-.. autoclass:: mitsuba.ad.common.PSIntegrator
+.. autoclass:: mitsuba.ad.integrators.common.PSIntegrator
 
-.. autoclass:: mitsuba.ad.common.RBIntegrator
+.. autoclass:: mitsuba.ad.integrators.common.RBIntegrator
 
-.. autofunction:: mitsuba.ad.common.mis_weight
+.. autofunction:: mitsuba.ad.integrators.common.mis_weight
 
 .. autoclass:: mitsuba.ad.largesteps.SolveCholesky
 
@@ -607,6 +609,12 @@
 .. autofunction:: mitsuba.cornell_box
 
 .. autofunction:: mitsuba.depolarizer
+
+.. autofunction:: mitsuba.detail.add_variant_callback
+
+.. autofunction:: mitsuba.detail.clear_variant_callbacks
+
+.. autofunction:: mitsuba.detail.remove_variant_callback
 
 .. autofunction:: mitsuba.eval_reflectance
 
@@ -694,8 +702,6 @@
 
 .. autofunction:: mitsuba.math.morton_encode3
 
-.. autofunction:: mitsuba.math.rlgamma
-
 .. autofunction:: mitsuba.math.round_to_power_of_two
 
 .. autofunction:: mitsuba.math.solve_quadratic
@@ -703,6 +709,16 @@
 .. autofunction:: mitsuba.math.srgb_to_linear
 
 .. autofunction:: mitsuba.math.ulpdiff
+
+.. autofunction:: mitsuba.math_py.rlgamma
+
+.. autofunction:: mitsuba.misc.core_count
+
+.. autofunction:: mitsuba.misc.mem_string
+
+.. autofunction:: mitsuba.misc.time_string
+
+.. autofunction:: mitsuba.misc.trap_debugger
 
 .. autofunction:: mitsuba.mueller.absorber
 
@@ -737,6 +753,8 @@
 .. autofunction:: mitsuba.mueller.stokes_basis
 
 .. autofunction:: mitsuba.mueller.unit_angle
+
+.. autofunction:: mitsuba.orthographic_projection
 
 .. autofunction:: mitsuba.parse_fov
 
@@ -800,6 +818,8 @@
 
 .. autofunction:: mitsuba.sample_tea_float64
 
+.. autofunction:: mitsuba.scoped_set_variant
+
 .. autofunction:: mitsuba.set_log_level
 
 .. autofunction:: mitsuba.set_variant
@@ -849,14 +869,6 @@
 .. autofunction:: mitsuba.unpolarized_spectrum
 
 .. autofunction:: mitsuba.util.convert_to_bitmap
-
-.. autofunction:: mitsuba.util.core_count
-
-.. autofunction:: mitsuba.util.mem_string
-
-.. autofunction:: mitsuba.util.time_string
-
-.. autofunction:: mitsuba.util.trap_debugger
 
 .. autofunction:: mitsuba.util.write_bitmap
 
@@ -961,6 +973,8 @@
 .. autofunction:: mitsuba.warp.uniform_triangle_to_square
 
 .. autofunction:: mitsuba.warp.von_mises_fisher_to_square
+
+.. autofunction:: mitsuba.while_loop
 
 .. autofunction:: mitsuba.xml.dict_to_xml
 

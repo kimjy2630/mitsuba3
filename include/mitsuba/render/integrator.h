@@ -38,6 +38,9 @@ class MI_EXPORT_LIB Integrator : public Object {
 public:
     MI_IMPORT_TYPES(Scene, Sensor)
 
+    /// Destructor
+    ~Integrator() { }
+
     /**
      * \brief Render the scene
      *
@@ -309,13 +312,17 @@ public:
      */
     virtual std::vector<std::string> aov_names() const;
 
+    /// Return a string identifier
+    std::string id() const override { return m_id; }
+
+    /// Set a string identifier
+    void set_id(const std::string& id) override { m_id = id; };
+
     MI_DECLARE_CLASS()
+
 protected:
     /// Create an integrator
     Integrator(const Properties & props);
-
-    /// Virtual destructor
-    virtual ~Integrator() { }
 
 protected:
     /// Integrators should stop all work when this flag is set to true.
@@ -333,6 +340,9 @@ protected:
 
     /// Flag for disabling direct visibility of emitters
     bool m_hide_emitters;
+    
+    /// Identifier (if available)
+    std::string m_id;
 };
 
 /** \brief Abstract integrator that performs Monte Carlo sampling starting from
@@ -351,6 +361,9 @@ public:
     MI_IMPORT_BASE(Integrator, should_stop, aov_names,
                     m_stop, m_timeout, m_render_timer, m_hide_emitters)
     MI_IMPORT_TYPES(Scene, Sensor, Film, ImageBlock, Medium, Sampler)
+
+    /// Destructor
+    ~SamplingIntegrator();
 
     /**
      * \brief Sample the incident radiance along a ray.
@@ -415,7 +428,6 @@ public:
     MI_DECLARE_CLASS()
 protected:
     SamplingIntegrator(const Properties &props);
-    virtual ~SamplingIntegrator();
 
     virtual void render_block(const Scene *scene,
                               const Sensor *sensor,
@@ -464,12 +476,12 @@ class MI_EXPORT_LIB MonteCarloIntegrator
 public:
     MI_IMPORT_BASE(SamplingIntegrator)
 
+    /// Destructor
+    ~MonteCarloIntegrator();
+
 protected:
     /// Create an integrator
     MonteCarloIntegrator(const Properties &props);
-
-    /// Virtual destructor
-    virtual ~MonteCarloIntegrator();
 
     MI_DECLARE_CLASS()
 protected:
@@ -496,6 +508,9 @@ public:
                     m_render_timer, m_hide_emitters)
     MI_IMPORT_TYPES(Scene, Sensor, Film, BSDF, BSDFPtr, ImageBlock, Sampler,
                      EmitterPtr)
+
+    /// Destructor
+    ~AdjointIntegrator();
 
     /**
      * \brief Sample the incident importance and splat the product of
@@ -540,9 +555,6 @@ public:
 protected:
     /// Create an integrator
     AdjointIntegrator(const Properties &props);
-
-    /// Virtual destructor
-    virtual ~AdjointIntegrator();
 
 protected:
     /**

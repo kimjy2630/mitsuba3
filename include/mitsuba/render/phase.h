@@ -4,7 +4,7 @@
 #include <mitsuba/render/bsdf.h>
 #include <mitsuba/render/interaction.h>
 #include <mitsuba/render/sampler.h>
-#include <drjit/vcall.h>
+#include <drjit/call.h>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -107,6 +107,9 @@ class MI_EXPORT_LIB PhaseFunction : public Object {
 public:
     MI_IMPORT_TYPES(PhaseFunctionContext);
 
+    /// Destructor
+    ~PhaseFunction();
+
     /**
      * \brief Importance sample the phase function model
      *
@@ -204,15 +207,19 @@ public:
     /// Return a human-readable representation of the phase function
     std::string to_string() const override = 0;
 
+    /// Return type of phase function
+    uint32_t get_flags() const { return m_flags; }
+
+    /// Set type of phase function
+    void set_flags(uint32_t flags) { m_flags = flags; }
+
     //! @}
     // -----------------------------------------------------------------------
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::PhaseFunction)
-
     MI_DECLARE_CLASS()
+
 protected:
     PhaseFunction(const Properties &props);
-    virtual ~PhaseFunction();
 
 protected:
     /// Type of phase function (e.g. anisotropic)
@@ -248,14 +255,14 @@ NAMESPACE_END(mitsuba)
 //! @{ \name Dr.Jit support for vectorized function calls
 // -----------------------------------------------------------------------
 
-DRJIT_VCALL_TEMPLATE_BEGIN(mitsuba::PhaseFunction)
-    DRJIT_VCALL_METHOD(sample)
-    DRJIT_VCALL_METHOD(eval_pdf)
-    DRJIT_VCALL_METHOD(projected_area)
-    DRJIT_VCALL_METHOD(max_projected_area)
-    DRJIT_VCALL_GETTER(flags, uint32_t)
-    DRJIT_VCALL_GETTER(component_count, size_t)
-DRJIT_VCALL_TEMPLATE_END(mitsuba::PhaseFunction)
+MI_CALL_TEMPLATE_BEGIN(PhaseFunction)
+    DRJIT_CALL_METHOD(sample)
+    DRJIT_CALL_METHOD(eval_pdf)
+    DRJIT_CALL_METHOD(projected_area)
+    DRJIT_CALL_METHOD(max_projected_area)
+    DRJIT_CALL_GETTER(flags)
+    DRJIT_CALL_GETTER(component_count)
+MI_CALL_TEMPLATE_END(PhaseFunction)
 
 //! @}
 // -----------------------------------------------------------------------

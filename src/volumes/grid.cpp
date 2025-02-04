@@ -30,6 +30,14 @@ Grid-based volume data source (:monosp:`gridvolume`)
      an existing ``VolumeGrid`` instance can be passed directly rather than
      loading it from the filesystem with :paramtype:`filename`.
 
+ * - use_grid_bbox
+   - |bool|
+   - When set to ``true``, the bounding box information contained in the
+     ``VolumeGrid`` object (or the file it was loaded from) will be used. By
+     default, it is assumed that the grid is defined in the unit cube spanning
+     (0, 0, 0) x (1, 1, 1). Any evaluation of the volume outside of the bounding
+     box is handled by the ``wrap_mode``. (Default: false)
+
  * - data
    - |tensor|
    - Tensor array containing the grid data. This parameter can only be specified
@@ -198,13 +206,13 @@ public:
                 if (!volume_grid)
                     Throw("Property \"grid\" must be a VolumeGrid instance.");
                 res = volume_grid->size();
-                channel_count = volume_grid->channel_count();
+                channel_count = (uint32_t) volume_grid->channel_count();
             } else if(props.has_property("data")) {
                 tensor = props.tensor<TensorXf>("data");
                 if (tensor->ndim() != 3 && tensor->ndim() != 4)
                     Throw("Tensor->has %ul dimensions. Expected 3 or 4", tensor->ndim());
                 res = { (uint32_t) tensor->shape(2), (uint32_t) tensor->shape(1), (uint32_t) tensor->shape(0) };
-                channel_count = tensor->ndim() == 4 ? tensor->shape(3) : 1;
+                channel_count = tensor->ndim() == 4 ? (uint32_t) tensor->shape(3) : 1;
 
                 if (channel_count != 1 && channel_count != 3 && channel_count != 6)
                     Throw("Tensor shape at index 3 is %lu invalid. Only volumes with 1, 3 or 6 "
@@ -216,7 +224,7 @@ public:
                     Log(Error, "\"%s\": file does not exist!", file_path);
                 volume_grid = new VolumeGrid(file_path);
                 res = volume_grid->size();
-                channel_count = volume_grid->channel_count();
+                channel_count = (uint32_t) volume_grid->channel_count();
             }
 
             ScalarUInt32 size = dr::prod(res);
@@ -485,9 +493,9 @@ protected:
             fetch_values[7] = d111.data();
 
             if (m_accel)
-                m_texture.eval_fetch(p, fetch_values, active);
+                m_texture.template eval_fetch<Float>(p, fetch_values, active);
             else
-                m_texture.eval_fetch_nonaccel(p, fetch_values, active);
+                m_texture.template eval_fetch_nonaccel<Float>(p, fetch_values, active);
 
             UnpolarizedSpectrum v000, v001, v010, v011, v100, v101, v110, v111;
             v000 = srgb_model_eval<UnpolarizedSpectrum>(dr::head<3>(d000), it.wavelengths);
@@ -529,9 +537,9 @@ protected:
         } else {
             dr::Array<Float, 4> v;
             if (m_accel)
-                m_texture.eval(p, v.data(), active);
+                m_texture.template eval<Float>(p, v.data(), active);
             else
-                m_texture.eval_nonaccel(p, v.data(), active);
+                m_texture.template eval_nonaccel<Float>(p, v.data(), active);
 
             return v.w() * srgb_model_eval<UnpolarizedSpectrum>(dr::head<3>(v), it.wavelengths);
         }
@@ -548,9 +556,9 @@ protected:
         Point3f p = m_to_local * it.p;
         Float result;
         if (m_accel)
-            m_texture.eval(p, &result, active);
+            m_texture.template eval<Float>(p, &result, active);
         else
-            m_texture.eval_nonaccel(p, &result, active);
+            m_texture.template eval_nonaccel<Float>(p, &result, active);
 
         return result;
     }
@@ -567,9 +575,9 @@ protected:
         Point3f p = m_to_local * it.p;
         Color3f result;
         if (m_accel)
-            m_texture.eval(p, result.data(), active);
+            m_texture.template eval<Float>(p, result.data(), active);
         else
-            m_texture.eval_nonaccel(p, result.data(), active);
+            m_texture.template eval_nonaccel<Float>(p, result.data(), active);
 
         return result;
     }
@@ -586,9 +594,9 @@ protected:
         Point3f p = m_to_local * it.p;
         dr::Array<Float, 6> result;
         if (m_accel)
-            m_texture.eval(p, result.data(), active);
+            m_texture.template eval<Float>(p, result.data(), active);
         else
-            m_texture.eval_nonaccel(p, result.data(), active);
+            m_texture.template eval_nonaccel<Float>(p, result.data(), active);
 
         return result;
     }
@@ -605,9 +613,9 @@ protected:
 
         Point3f p = m_to_local * it.p;
         if (m_accel)
-            m_texture.eval(p, out, active);
+            m_texture.template eval<Float>(p, out, active);
         else
-            m_texture.eval_nonaccel(p, out, active);
+            m_texture.template eval_nonaccel<Float>(p, out, active);
     }
 
 protected:

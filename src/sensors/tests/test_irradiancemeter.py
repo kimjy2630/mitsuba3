@@ -7,7 +7,7 @@ def sensor_shape_dict(radius, center):
     return {
         'type': 'sphere',
         'radius': radius,
-        'to_world': mi.ScalarTransform4f.translate(center),
+        'to_world': mi.ScalarTransform4f().translate(center),
         'sensor': {
             'type': 'irradiancemeter',
             'film': {
@@ -33,7 +33,7 @@ def test_construct(variant_scalar_rgb):
     sphere = mi.load_dict(sensor_shape_dict(radius, center_v))
     sensor = sphere.sensor()
 
-    assert sensor.shape() == sphere
+    assert sensor.get_shape() == sphere
     assert dr.allclose(sensor.film().size(), [1, 1])
 
 
@@ -140,3 +140,19 @@ def test_incoming_flux_integrator(variant_scalar_rgb, radiance):
                                         mi.Struct.Type.Float32, srgb_gamma=False)
 
     assert dr.allclose(mi.TensorXf(img), (radiance * dr.pi))
+
+
+def test_shape_accessors(variants_vec_rgb):
+    center_v = mi.ScalarVector3f(0.0)
+    radius = 1.0
+    shape = mi.load_dict(sensor_shape_dict(radius, center_v))
+    shape_ptr = mi.ShapePtr(shape)
+
+    assert type(shape.sensor()) == mi.Sensor
+    assert type(shape_ptr.sensor()) == mi.SensorPtr
+
+    sensor = shape.sensor()
+    sensor_ptr = mi.SensorPtr(sensor)
+
+    assert type(sensor.get_shape()) == mi.Shape
+    assert type(sensor_ptr.get_shape()) == mi.ShapePtr

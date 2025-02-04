@@ -1,3 +1,5 @@
+#include <shared_mutex>
+
 #include <mitsuba/core/bitmap.h>
 #include <mitsuba/core/jit.h>
 #include <mitsuba/core/logger.h>
@@ -5,6 +7,11 @@
 #include <mitsuba/core/fresolver.h>
 #include <mitsuba/core/profiler.h>
 #include <mitsuba/python/python.h>
+
+
+// Flag & mutex to explicitly track if Python is still available.
+static bool ready_flag = true;
+static std::shared_mutex ready_mutex;
 
 // core
 MI_PY_DECLARE(atomic);
@@ -28,7 +35,7 @@ MI_PY_DECLARE(ProgressReporter);
 MI_PY_DECLARE(rfilter);
 MI_PY_DECLARE(Thread);
 MI_PY_DECLARE(Timer);
-MI_PY_DECLARE(util);
+MI_PY_DECLARE(misc);
 
 // render
 MI_PY_DECLARE(BSDFContext);
@@ -42,12 +49,12 @@ MI_PY_DECLARE(VolumeGrid);
 MI_PY_DECLARE(FilmFlags);
 MI_PY_DECLARE(DiscontinuityFlags);
 
-PYBIND11_MODULE(mitsuba_ext, m) {
+NB_MODULE(mitsuba_ext, m) {
     // Temporarily change the module name (for pydoc)
     m.attr("__name__") = "mitsuba";
 
     // Expose some constants in the main `mitsuba` module
-    m.attr("__version__")       = MI_VERSION;
+    m.attr("__version__")      = MI_VERSION;
     m.attr("MI_VERSION")       = MI_VERSION;
     m.attr("MI_VERSION_MAJOR") = MI_VERSION_MAJOR;
     m.attr("MI_VERSION_MINOR") = MI_VERSION_MINOR;
@@ -73,10 +80,29 @@ PYBIND11_MODULE(mitsuba_ext, m) {
     m.attr("MI_ENABLE_EMBREE") = false;
 #endif
 
-    m.def("set_log_level", [](mitsuba::LogLevel level) {
+    // Initialize reference counting hooks for mitsuba::Object
+    nb::intrusive_init(
+        [](PyObject *o) noexcept {
+            nb::gil_scoped_acquire guard;
+            Py_INCREF(o);
+        },
+        [](PyObject *o) noexcept {
+            std::shared_lock ready_guard(ready_mutex);
+            /* If the Python interpreter has already been shut down, we can no longer use
+             * its reference counting mechanism. This leaks memory on interpreter shutdown.
+             * However, this should only affect static, thread local objects, for which
+             * enforcing an orderly shutdown is difficult. */
+            if (!ready_flag && (Thread::thread() != Thread::get_main_thread()))
+                return;
 
+            nb::gil_scoped_acquire guard;
+            Py_DECREF(o);
+        }
+    );
+
+    m.def("set_log_level", [](mitsuba::LogLevel level) {
         if (!Thread::thread()->logger()) {
-            Throw("No Logger instance is set on the current thread! This is likely due to " 
+            Throw("No Logger instance is set on the current thread! This is likely due to "
                   "set_log_level being called from a non-Mitsuba thread. You can manually set a "
                   "thread's ThreadEnvironment (which includes the logger) using "
                   "ScopedSetThreadEnvironment e.g.\n"
@@ -134,7 +160,7 @@ PYBIND11_MODULE(mitsuba_ext, m) {
     MI_PY_IMPORT(ProgressReporter);
     MI_PY_IMPORT(Thread);
     MI_PY_IMPORT(Timer);
-    MI_PY_IMPORT(util);
+    MI_PY_IMPORT(misc);
 
     MI_PY_IMPORT(BSDFContext);
     MI_PY_IMPORT(EmitterExtras);
@@ -146,27 +172,61 @@ PYBIND11_MODULE(mitsuba_ext, m) {
     MI_PY_IMPORT(FilmFlags);
     MI_PY_IMPORT(DiscontinuityFlags);
 
-    // Register a cleanup callback function to wait for pending tasks
-    auto atexit = py::module_::import("atexit");
-    atexit.attr("register")(py::cpp_function([]() {
-        Thread::wait_for_tasks();
+    /* Register a cleanup callback function to wait for pending tasks (this is
+     * called before all Python variables are cleaned up */
+    auto atexit = nb::module_::import_("atexit");
+    atexit.attr("register")(nb::cpp_function([]() {
+        {
+            nb::gil_scoped_release g;
+            Thread::wait_for_tasks();
+        }
+        Class::static_remove_functors();
+        StructConverter::static_shutdown();
+
+        /* Potentially re-initialize the threading system:
+         * 1) Deleting and re-initializing threading prevents a Nanobind leak
+         * if the lifetime of the main thread was shared with Python.
+         * 2) Additionally, this can ensure correct shutdown if the shutdown
+         * happens on another thread than the initialization. */
+        if (!Thread::has_initialized_thread() || Thread::thread()->self_py()) {
+            Thread::static_shutdown();
+            Thread::static_initialization();
+        }
+
+        /* After this point, we can no longer guarantee that the Python
+         * interpreter is available on all threads. */
+        {
+            nb::gil_scoped_release g;
+            std::unique_lock ready_guard(ready_mutex);
+            ready_flag = false;
+        }
     }));
 
-    /* Register a cleanup callback function that is invoked when
-       the 'mitsuba::Object' Python type is garbage collected */
-    py::cpp_function cleanup_callback(
-        [](py::handle weakref) {
-            Profiler::static_shutdown();
-            Bitmap::static_shutdown();
-            Logger::static_shutdown();
-            Thread::static_shutdown();
-            Class::static_shutdown();
-            Jit::static_shutdown();
-            weakref.dec_ref();
-        }
-    );
+    /* Callback function cleanup static data structures, this should be called
+     * when the module is being deallocated */
+    nanobind_module_def_mitsuba_ext.m_free = [](void *) {
+        Profiler::static_shutdown();
+        Bitmap::static_shutdown();
+        Logger::static_shutdown();
+        Thread::static_shutdown();
+        Class::static_shutdown();
+        Jit::static_shutdown();
+    };
 
-    (void) py::weakref(m.attr("Object"), cleanup_callback).release();
+    /* Make this a package, thus allowing statements such as:
+     * `from mitsuba.test.util import function`
+     * For that `__path__` needs to be populated. We do it by using the
+     * `__file__` attribute of a Python file which is located in the same
+     * directory as this module */
+    nb::module_ os = nb::module_::import_("os");
+    nb::module_ cfg = nb::module_::import_("mitsuba.config");
+    nb::object cfg_path = os.attr("path").attr("realpath")(cfg.attr("__file__"));
+    nb::object mi_dir = os.attr("path").attr("dirname")(cfg_path);
+    nb::object mi_py_dir = os.attr("path").attr("join")(mi_dir, "python");
+    nb::list paths{};
+    paths.append(nb::str(mi_dir));
+    paths.append(nb::str(mi_py_dir));
+    m.attr("__path__") = paths;
 
     // Change module name back to correct value
     m.attr("__name__") = "mitsuba_ext";

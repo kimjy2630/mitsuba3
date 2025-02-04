@@ -72,7 +72,6 @@ public:
         m_flags = +EmitterFlags::Surface;
         if (m_radiance->is_spatially_varying())
             m_flags |= +EmitterFlags::SpatiallyVarying;
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -133,13 +132,13 @@ public:
         if (likely(!m_radiance->is_spatially_varying())) {
             // Texture is uniform, try to importance sample the shape wrt. solid angle at 'it'
             ds = m_shape->sample_direction(it, sample, active);
-            active &= dr::dot(ds.d, ds.n) < 0.f && dr::neq(ds.pdf, 0.f);
+            active &= dr::dot(ds.d, ds.n) < 0.f && (ds.pdf != 0.f);
 
             si = SurfaceInteraction3f(ds, it.wavelengths);
         } else {
             // Importance sample the texture, then map onto the shape
             auto [uv, pdf] = m_radiance->sample_position(sample, active);
-            active &= dr::neq(pdf, 0.f);
+            active &= (pdf != 0.f);
 
             si = m_shape->eval_parameterization(uv, +RayFlags::All, active);
             si.wavelengths = it.wavelengths;
@@ -189,7 +188,7 @@ public:
             SurfaceInteraction3f si = m_shape->eval_parameterization(ds.uv, +RayFlags::dPdUV, active);
             active &= si.is_valid();
 
-            value = m_radiance->pdf_position(ds.uv, active) * dr::sqr(ds.dist) /
+            value = m_radiance->pdf_position(ds.uv, active) * dr::square(ds.dist) /
                     (dr::norm(dr::cross(si.dp_du, si.dp_dv)) * -dp);
         }
 
@@ -229,7 +228,7 @@ public:
         } else {
             // Importance sample texture
             auto [uv, pdf] = m_radiance->sample_position(sample, active);
-            active &= dr::neq(pdf, 0.f);
+            active &= (pdf != 0.f);
 
             auto si = m_shape->eval_parameterization(uv, +RayFlags::All, active);
             active &= si.is_valid();

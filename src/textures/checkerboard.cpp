@@ -74,7 +74,7 @@ public:
         dr::mask_t<Point2f> mask = uv - dr::floor(uv) > .5f;
         UnpolarizedSpectrum result = dr::zeros<UnpolarizedSpectrum>();
 
-        Mask m0 = dr::eq(mask.x(), mask.y()),
+        Mask m0 = mask.x() == mask.y(),
              m1 = !m0;
 
         m0 &= active; m1 &= active;
@@ -95,7 +95,7 @@ public:
         dr::mask_t<Point2f> mask = (uv - dr::floor(uv)) > .5f;
         Float result = 0.f;
 
-        Mask m0 = dr::neq(mask.x(), mask.y()),
+        Mask m0 = (mask.x() != mask.y()),
              m1 = !m0;
 
         m0 &= active; m1 &= active;

@@ -65,15 +65,20 @@ MI_VARIANT Sensor<Float, Spectrum>::Sensor(const Properties &props) : Base(props
 
     if (has_flag(m_film->flags(), FilmFlags::Spectral)) {
         if (m_srf != nullptr) {
-            Throw("Sensor(): Spectral response function defined previously in sensor,"
+            Throw("Sensor(): Spectral response function defined previously in sensor, "
                   "but another was found in film.");
         } else {
             m_srf = m_film->sensor_response_function();
         }
     }
+
+    MI_REGISTRY_PUT("Sensor", this);
 }
 
-MI_VARIANT Sensor<Float, Spectrum>::~Sensor() {}
+MI_VARIANT Sensor<Float, Spectrum>::~Sensor() {
+    if constexpr (dr::is_jit_v<Float>)
+        jit_registry_remove(this);
+}
 
 MI_VARIANT std::pair<typename Sensor<Float, Spectrum>::RayDifferential3f, Spectrum>
 Sensor<Float, Spectrum>::sample_ray_differential(Float time, Float sample1, const Point2f &sample2,

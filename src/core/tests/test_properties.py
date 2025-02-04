@@ -13,6 +13,7 @@ def fill_properties(p):
     p['prop_4'] = 1.25
     p['prop_5'] = Array3f(1, 2, 3)
     p['prop_6'] = mi.ScalarColor3f(1, 2, 3)
+    p['prop_7'] = mi.Object()
 
 
 def test01_name_and_id(variant_scalar_rgb):
@@ -43,8 +44,8 @@ def test02_type_is_preserved(variant_scalar_rgb):
     assert p['prop_2'] == '1'
     assert p['prop_3'] == False
     assert p['prop_4'] == 1.25
-    assert p['prop_5'] == Array3f(1, 2, 3)
-    assert p['prop_6'] == mi.ScalarColor3f(1, 2, 3)
+    assert dr.all(p['prop_5'] == Array3f(1, 2, 3))
+    assert dr.all(p['prop_6'] == mi.ScalarColor3f(1, 2, 3))
 
     # Updating an existing property but using a different type
     p['prop_2'] = 2
@@ -84,12 +85,12 @@ def test04_queried_properties(variant_scalar_rgb):
     assert p.was_queried('prop_1')
     assert p.was_queried('prop_2')
     assert not p.was_queried('prop_3')
-    assert p.unqueried() == ['prop_3', 'prop_4', 'prop_5', 'prop_6']
+    assert p.unqueried() == ['prop_3', 'prop_4', 'prop_5', 'prop_6', 'prop_7']
 
     # Mark field as queried explicitly
     p.mark_queried('prop_4')
     assert p.was_queried('prop_4')
-    assert p.unqueried() == ['prop_3', 'prop_5', 'prop_6']
+    assert p.unqueried() == ['prop_3', 'prop_5', 'prop_6', 'prop_7']
 
 
 def test05_copy_and_merge(variant_scalar_rgb):
@@ -117,6 +118,7 @@ def test06_equality(variant_scalar_rgb):
     fill_properties(p)
     del p['prop_5']
     del p['prop_6']
+    del p['prop_7']
 
     # Equality should encompass properties, their type,
     # the instance's plugin_name and id properties
@@ -184,11 +186,11 @@ def test09_create_object(variants_all_rgb):
 def test10_animated_transforms(variant_scalar_rgb):
     """An AnimatedTransform can be built from a given Transform."""
     p = mi.Properties()
-    p["trafo"] = mi.Transform4f.translate([1, 2, 3])
+    p["trafo"] = mi.Transform4f().translate([1, 2, 3])
 
     atrafo = mi.AnimatedTransform()
-    atrafo.append(0, mi.Transform4f.translate([-1, -1, -2]))
-    atrafo.append(1, mi.Transform4f.translate([4, 3, 2]))
+    atrafo.append(0, mi.Transform4f().translate([-1, -1, -2]))
+    atrafo.append(1, mi.Transform4f().translate([4, 3, 2]))
     p["atrafo"] = atrafo
 
     assert type(p["trafo"]) is mi.Transform4d
@@ -196,9 +198,10 @@ def test10_animated_transforms(variant_scalar_rgb):
 
 def test10_transforms3(variant_scalar_rgb):
     p = mi.Properties()
-    p["transform"] = mi.ScalarTransform3d.translate([2,4])
+    p["transform"] = mi.ScalarTransform3d().translate([2,4])
 
     assert type(p["transform"] is mi.ScalarTransform3d)
+
 
 def test11_tensor(variant_scalar_rgb):
     props = mi.Properties()
@@ -215,18 +218,16 @@ def test11_tensor(variant_scalar_rgb):
 
     # Check numpy
     import numpy as np
-    props['goo'] = np.zeros((2, 3, 4))
+    props['goo'] = mi.TensorXf(np.zeros((2, 3, 4)))
     assert props['goo'].shape == (2, 3, 4)
 
-def test11_tensor_cuda(variant_cuda_ad_rgb):
-    # Check tensor flow
-    tf = pytest.importorskip("tensorflow")
-    props['boo'] = tf.constant([[1, 2], [3, 4]])
-    assert props['boo'].shape == (2, 2)
 
-    # Check PyTorch
+def test11_tensor_cuda(variant_cuda_ad_rgb):
+    props = mi.Properties()
+
+    ### Check PyTorch
     torch = pytest.importorskip("torch")
-    props['goo'] = torch.zeros(2, 3, 4)
+    props['goo'] = mi.TensorXf(torch.zeros(2, 3, 4))
     assert props['goo'].shape == (2, 3, 4)
 
 def test12_large_integer_keys(variant_scalar_rgb):

@@ -83,7 +83,7 @@ public:
             }
         }
 
-        if (m_film->size() != ScalarPoint2i(1, 1))
+        if (dr::all(m_film->size() != ScalarPoint2i(1, 1)))
             Throw("This sensor only supports films of size 1x1 Pixels!");
 
         if (m_film->rfilter()->radius() >
@@ -124,7 +124,7 @@ public:
                             const Point2f & /*aperture_sample*/,
                             Mask active) const override {
         MI_MASKED_FUNCTION(ProfilerPhase::EndpointSampleRay, active);
-        RayDifferential3f ray;
+        RayDifferential3f ray = dr::zeros<RayDifferential3f>();
         ray.time = time;
 
         // 1. Sample spectrum

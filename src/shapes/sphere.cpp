@@ -84,7 +84,7 @@ The two declarations below are equivalent.
 
         'sphere_1': {
             'type': 'sphere',
-            'to_world': mi.ScalarTransform4f.scale([2, 2, 2]).translate([1, 0, 0]),
+            'to_world': mi.ScalarTransform4f().scale([2, 2, 2]).translate([1, 0, 0]),
             'bsdf': {
                 'type': 'diffuse'
             }
@@ -136,10 +136,8 @@ public:
             ScalarTransform4f::scale(props.get<ScalarFloat>("radius", 1.f));
 
         m_discontinuity_types = (uint32_t) DiscontinuityFlags::InteriorType;
-        dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
 
         m_shape_type = ShapeType::Sphere;
-        dr::set_attr(this, "shape_type", m_shape_type);
 
         update();
         initialize();
@@ -200,7 +198,7 @@ public:
     }
 
     Float surface_area() const override {
-        return 4.f * dr::Pi<ScalarFloat> * dr::sqr(m_radius.value());
+        return 4.f * dr::Pi<ScalarFloat> * dr::square(m_radius.value());
     }
 
     // =============================================================
@@ -244,24 +242,24 @@ public:
         Float radius_adj = m_radius.value() * (m_flip_normals ?
                                                (1.f + math::RayEpsilon<Float>) :
                                                (1.f - math::RayEpsilon<Float>));
-        Mask outside_mask = active && dc_2 > dr::sqr(radius_adj);
+        Mask outside_mask = active && dc_2 > dr::square(radius_adj);
         if (likely(dr::any_or<true>(outside_mask))) {
             Float inv_dc            = dr::rsqrt(dc_2),
                   sin_theta_max     = m_radius.value() * inv_dc,
-                  sin_theta_max_2   = dr::sqr(sin_theta_max),
+                  sin_theta_max_2   = dr::square(sin_theta_max),
                   inv_sin_theta_max = dr::rcp(sin_theta_max),
                   cos_theta_max     = dr::safe_sqrt(1.f - sin_theta_max_2);
 
             /* Fall back to a Taylor series expansion for small angles, where
                the standard approach suffers from severe cancellation errors */
             Float sin_theta_2 = dr::select(sin_theta_max_2 > 0.00068523f, /* sin^2(1.5 deg) */
-                                       1.f - dr::sqr(dr::fmadd(cos_theta_max - 1.f, sample.x(), 1.f)),
+                                       1.f - dr::square(dr::fmadd(cos_theta_max - 1.f, sample.x(), 1.f)),
                                        sin_theta_max_2 * sample.x()),
                   cos_theta = dr::safe_sqrt(1.f - sin_theta_2);
 
             // Based on https://www.akalin.com/sampling-visible-sphere
             Float cos_alpha = sin_theta_2 * inv_sin_theta_max +
-                              cos_theta * dr::safe_sqrt(dr::fnmadd(sin_theta_2, dr::sqr(inv_sin_theta_max), 1.f)),
+                              cos_theta * dr::safe_sqrt(dr::fnmadd(sin_theta_2, dr::square(inv_sin_theta_max), 1.f)),
                   sin_alpha = dr::safe_sqrt(dr::fnmadd(cos_alpha, cos_alpha, 1.f));
 
             auto [sin_phi, cos_phi] = dr::sincos(sample.y() * (2.f * dr::Pi<Float>));
@@ -280,7 +278,7 @@ public:
             ds.dist     = dr::sqrt(dist2);
             ds.d        = ds.d / ds.dist;
             ds.pdf      = warp::square_to_uniform_cone_pdf(dr::zeros<Vector3f>(), cos_theta_max);
-            dr::masked(ds.pdf, dr::eq(ds.dist, 0.f)) = 0.f;
+            dr::masked(ds.pdf, ds.dist == 0.f) = 0.f;
 
             dr::masked(result, outside_mask) = ds;
         }
@@ -321,7 +319,7 @@ public:
         return dr::select(sin_alpha < dr::OneMinusEpsilon<Float>,
             // Reference point lies outside the sphere
             warp::square_to_uniform_cone_pdf(dr::zeros<Vector3f>(), cos_alpha),
-            m_inv_surface_area * dr::sqr(ds.dist) / dr::abs_dot(ds.d, ds.n)
+            m_inv_surface_area * dr::square(ds.dist) / dr::abs_dot(ds.d, ds.n)
         );
     }
 
@@ -447,7 +445,7 @@ public:
 
     std::tuple<DynamicBuffer<UInt32>, DynamicBuffer<Float>>
     precompute_silhouette(const ScalarPoint3f & /*viewpoint*/) const override {
-        DynamicBuffer<UInt32> indices(DiscontinuityFlags::InteriorType);
+        DynamicBuffer<UInt32> indices((uint32_t)DiscontinuityFlags::InteriorType);
         DynamicBuffer<Float> weights(1.f);
 
         return {indices, weights};
@@ -528,7 +526,7 @@ public:
 
         // Ray is perpendicular to plane
         dr::mask_t<FloatP> no_hit =
-            dr::eq(plane_t, 0) && dr::all(dr::neq(ray.o, center));
+            plane_t == Value(0) && dr::all(ray.o != center);
 
         Value3 plane_p = ray(FloatP(plane_t));
 
@@ -539,7 +537,7 @@ public:
 
         Value A = dr::squared_norm(d);
         Value B = dr::scalar_t<Value>(2.f) * dr::dot(o, d);
-        Value C = dr::squared_norm(o) - dr::sqr(radius);
+        Value C = dr::squared_norm(o) - dr::square(radius);
 
         auto [solution_found, near_t, far_t] = math::solve_quadratic(A, B, C);
 
@@ -591,7 +589,7 @@ public:
 
         Value A = dr::squared_norm(d);
         Value B = dr::scalar_t<Value>(2.f) * dr::dot(o, d);
-        Value C = dr::squared_norm(o) - dr::sqr(radius);
+        Value C = dr::squared_norm(o) - dr::square(radius);
 
         auto [solution_found, near_t, far_t] = math::solve_quadratic(A, B, C);
 
@@ -675,7 +673,7 @@ public:
         si.t = dr::select(active, si.t, dr::Infinity<Float>);
 
         if (likely(need_uv)) {
-            Float rd_2  = dr::sqr(local.x()) + dr::sqr(local.y()),
+            Float rd_2  = dr::square(local.x()) + dr::square(local.y()),
                   theta = unit_angle_z(local),
                   phi   = dr::atan2(local.y(), local.x());
 
@@ -694,7 +692,7 @@ public:
                                     local.z() * sin_phi,
                                     -rd);
 
-                Mask singularity_mask = active && dr::eq(rd, 0.f);
+                Mask singularity_mask = active && (rd == 0.f);
                 if (unlikely(dr::any_or<true>(singularity_mask)))
                     si.dp_dv[singularity_mask] = Vector3f(1.f, 0.f, 0.f);
 

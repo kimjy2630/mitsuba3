@@ -64,7 +64,8 @@ class SceneParameters(Mapping):
         if value_type is not None:
             cur_value = self.get_property(cur, value_type, node)
 
-        if _jit_id_hash(cur_value) == _jit_id_hash(value) and cur_value == value:
+        if (_jit_id_hash(cur_value) == _jit_id_hash(value) and
+            dr.all(cur_value == value, axis=None)):
             # Turn this into a no-op when the set value is identical to the new value
             return
 
@@ -72,9 +73,9 @@ class SceneParameters(Mapping):
 
         if value_type is None:
             try:
-                cur.assign(value)
-            except AttributeError as e:
-                if "has no attribute 'assign'" in str(e):
+                self.set_property(cur, value)
+            except Exception as e:
+                if "Target property type isn't a nanobind type" in str(e):
                     mi.Log(
                         mi.LogLevel.Warn,
                         f"Parameter '{key}' cannot be modified! This usually "
@@ -159,7 +160,7 @@ class SceneParameters(Mapping):
         """
         value, _, node, flags = self.properties[key]
 
-        is_nondifferentiable = (flags & mi.ParamFlags.NonDifferentiable.value)
+        is_nondifferentiable = (flags & mi.ParamFlags.NonDifferentiable)
         if is_nondifferentiable and dr.grad_enabled(value):
             mi.Log(
                 mi.LogLevel.Warn,
@@ -261,31 +262,7 @@ def _jit_id_hash(value: Any) -> int:
     """
 
     def jit_ids(value: Any) -> list[tuple[int, Optional[int]]]:
-        ids = []
-
-        if dr.is_static_array_v(value):
-            for i in range(len(value)):
-                ids.extend(jit_ids(value[i]))
-        elif dr.is_diff_v(value):
-            ids.append((value.index, value.index_ad))
-        elif dr.is_tensor_v(value):
-            ids.extend(jit_ids(value.array))
-        elif dr.is_jit_v(value):
-            ids.append((value.index, 0))
-        elif dr.is_array_v(value) and dr.is_dynamic_array_v(value):
-            for i in range(len(value)):
-                ids.extend(jit_ids(value[i]))
-        elif dr.is_struct_v(value):
-            for k in value.DRJIT_STRUCT.keys():
-                ids.extend(jit_ids(getattr(value, k)))
-        else:
-            # Scalars: None is used to differentiate from non-diff JIT array case
-            try:
-                ids.append((hash(value), None))
-            except TypeError:
-                ids.append((id(value), None))
-
-        return ids
+        return dr.detail.collect_indices(value)
 
     return hash(tuple(jit_ids(value)))
 
@@ -365,9 +342,12 @@ class _RenderOp(dr.CustomOp):
         super().__init__()
         self.variant = mi.variant()
 
-    def eval(self, scene, sensor, params, integrator, seed, spp):
+    def eval(self, scene, sensor, _, params, integrator, seed, spp):
         self.scene = scene
         self.sensor = sensor
+        # The argument `_` is a `dict` of the parameters that is detached,
+        # whereas `params` is a `SceneParameters` object that still contains
+        # a referece to the attached paraamters
         self.params = params
         self.integrator = integrator
         self.seed = seed
@@ -384,23 +364,11 @@ class _RenderOp(dr.CustomOp):
             )
 
     def forward(self):
-        mi.set_variant(self.variant)
-        if not isinstance(self.params, mi.SceneParameters):
-            raise Exception('An instance of mi.SceneParameter containing the '
-                            'scene parameter to be differentiated should be '
-                            'provided to mi.render() if forward derivatives are '
-                            'desired!')
         self.set_grad_out(
             self.integrator.render_forward(self.scene, self.params, self.sensor,
                                            self.seed[1], self.spp[1]))
 
     def backward(self):
-        mi.set_variant(self.variant)
-        if not isinstance(self.params, mi.SceneParameters):
-            raise Exception('An instance of mi.SceneParameter containing the '
-                            'scene parameter to be differentiated should be '
-                            'provided to mi.render() if backward derivatives are '
-                            'desired!')
         self.integrator.render_backward(self.scene, self.params, self.grad_out(),
                                         self.sensor, self.seed[1], self.spp[1])
 
@@ -411,7 +379,7 @@ def render(scene: mi.Scene,
            params: Any = None,
            sensor: Union[int, mi.Sensor] = 0,
            integrator: mi.Integrator = None,
-           seed: int = 0,
+           seed: mi.UInt32 = 0,
            seed_grad: int = 0,
            spp: int = 0,
            spp_grad: int = 0) -> mi.TensorXf:
@@ -465,14 +433,14 @@ def render(scene: mi.Scene,
         default, the integrator specified in the original scene description will
         be used.
 
-    Parameter ``seed`` (``int``)
+    Parameter ``seed`` (``mi.UInt32``)
         This parameter controls the initialization of the random number
         generator during the primal rendering step. It is crucial that you
         specify different seeds (e.g., an increasing sequence) if subsequent
         calls should produce statistically independent images (e.g. to
         de-correlate gradient-based optimization steps).
 
-    Parameter ``seed_grad`` (``int``)
+    Parameter ``seed_grad`` (``mi.UInt32``)
         This parameter is analogous to the ``seed`` parameter but targets the
         differential simulation phase. If not specified, the implementation will
         automatically compute a suitable value from the primal ``seed``.
@@ -489,7 +457,11 @@ def render(scene: mi.Scene,
     """
 
     if params is not None and not isinstance(params, mi.SceneParameters):
-        raise Exception('params should be an instance of mi.SceneParameter!')
+        raise Exception('The `params` argument should be an instance of `mi.SceneParameters`!')
+
+    dict_params = dict()
+    if params is not None:
+        dict_params = dict(params) # Turn SceneParameters into a valid PyTree
 
     assert isinstance(scene, mi.Scene)
 
@@ -519,7 +491,21 @@ def render(scene: mi.Scene,
         raise Exception('The primal and differential seed should be different '
                         'to ensure unbiased gradient computation!')
 
-    return dr.custom(_RenderOp, scene, sensor, params, integrator,
+    if 'scalar' in mi.variant():
+        return integrator.render(
+                scene=scene,
+                sensor=sensor,
+                seed=seed,
+                spp=spp,
+                develop=True,
+                evaluate=False
+            )
+
+    # Both `dict_params` and `params` are passed. The former is necessary
+    # because it allows the custom operation to detect any attached input
+    # arguments. The latter is necessary because it will not be automatically
+    # detached by the custom operation.
+    return dr.custom(_RenderOp, scene, sensor, dict_params, params, integrator,
                      (seed, seed_grad), (spp, spp_grad))
 
 # ------------------------------------------------------------------------------
@@ -566,7 +552,7 @@ def cornell_box():
     '''
     Returns a dictionary containing a description of the Cornell Box scene.
     '''
-    T = mi.scalar_rgb.Transform4f
+    T = mi.ScalarTransform4f
     return {
         'type': 'scene',
         'integrator': {
@@ -581,7 +567,7 @@ def cornell_box():
             'far_clip': 100.0,
             'focus_distance': 1000,
             'fov': 39.3077,
-            'to_world': T.look_at(
+            'to_world': T().look_at(
                 origin=[0, 0, 3.90],
                 target=[0, 0, 0],
                 up=[0, 1, 0]
@@ -626,7 +612,7 @@ def cornell_box():
         # -------------------- Light --------------------
         'light': {
             'type': 'rectangle',
-            'to_world': T.translate([0.0, 0.99, 0.01]).rotate([1, 0, 0], 90).scale([0.23, 0.19, 0.19]),
+            'to_world': T().translate([0.0, 0.99, 0.01]).rotate([1, 0, 0], 90).scale([0.23, 0.19, 0.19]),
             'bsdf': {
                 'type': 'ref',
                 'id': 'white'
@@ -642,7 +628,7 @@ def cornell_box():
         # -------------------- Shapes --------------------
         'floor': {
             'type': 'rectangle',
-            'to_world': T.translate([0.0, -1.0, 0.0]).rotate([1, 0, 0], -90),
+            'to_world': T().translate([0.0, -1.0, 0.0]).rotate([1, 0, 0], -90),
             'bsdf': {
                 'type': 'ref',
                 'id':  'white'
@@ -650,7 +636,7 @@ def cornell_box():
         },
         'ceiling': {
             'type': 'rectangle',
-            'to_world': T.translate([0.0, 1.0, 0.0]).rotate([1, 0, 0], 90),
+            'to_world': T().translate([0.0, 1.0, 0.0]).rotate([1, 0, 0], 90),
             'bsdf': {
                 'type': 'ref',
                 'id':  'white'
@@ -658,7 +644,7 @@ def cornell_box():
         },
         'back': {
             'type': 'rectangle',
-            'to_world': T.translate([0.0, 0.0, -1.0]),
+            'to_world': T().translate([0.0, 0.0, -1.0]),
             'bsdf': {
                 'type': 'ref',
                 'id':  'white'
@@ -666,7 +652,7 @@ def cornell_box():
         },
         'green-wall': {
             'type': 'rectangle',
-            'to_world': T.translate([1.0, 0.0, 0.0]).rotate([0, 1, 0], -90),
+            'to_world': T().translate([1.0, 0.0, 0.0]).rotate([0, 1, 0], -90),
             'bsdf': {
                 'type': 'ref',
                 'id':  'green'
@@ -674,7 +660,7 @@ def cornell_box():
         },
         'red-wall': {
             'type': 'rectangle',
-            'to_world': T.translate([-1.0, 0.0, 0.0]).rotate([0, 1, 0], 90),
+            'to_world': T().translate([-1.0, 0.0, 0.0]).rotate([0, 1, 0], 90),
             'bsdf': {
                 'type': 'ref',
                 'id':  'red'
@@ -682,7 +668,7 @@ def cornell_box():
         },
         'small-box': {
             'type': 'cube',
-            'to_world': T.translate([0.335, -0.7, 0.38]).rotate([0, 1, 0], -17).scale(0.3),
+            'to_world': T().translate([0.335, -0.7, 0.38]).rotate([0, 1, 0], -17).scale(0.3),
             'bsdf': {
                 'type': 'ref',
                 'id':  'white'
@@ -690,7 +676,7 @@ def cornell_box():
         },
         'large-box': {
             'type': 'cube',
-            'to_world': T.translate([-0.33, -0.4, -0.28]).rotate([0, 1, 0], 18.25).scale([0.3, 0.61, 0.3]),
+            'to_world': T().translate([-0.33, -0.4, -0.28]).rotate([0, 1, 0], 18.25).scale([0.3, 0.61, 0.3]),
             'bsdf': {
                 'type': 'ref',
                 'id':  'white'
@@ -714,3 +700,5 @@ def variant_context(*args) -> None:
         raise
     finally:
         mi.set_variant(old_variant)
+
+scoped_set_variant = variant_context

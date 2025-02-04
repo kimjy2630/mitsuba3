@@ -43,6 +43,9 @@ public:
     /// Instantiate a scene from a \ref Properties object
     Scene(const Properties &props);
 
+    /// Destructor
+    ~Scene();
+
     // =============================================================
     //! @{ \name Ray tracing
     // =============================================================
@@ -419,11 +422,6 @@ public:
      * illumination sample is important for differentiable rendering. For
      * example, we might want to track derivatives in the sampled direction
      * (<tt>ds.d</tt>) without also differentiating the sampling technique.
-     * Alternatively (or additionally), it may be necessary to apply a
-     * spherical reparameterization to <tt>ds.d</tt>  to handle
-     * visibility-induced discontinuities during differentiation. Both steps
-     * require re-evaluating the contribution of the emitter while tracking
-     * derivative information through the calculation.
      *
      * In contrast to \ref pdf_emitter_direction(), evaluating this function can
      * yield a nonzero result in the case of emission profiles containing a
@@ -563,10 +561,8 @@ public:
     static void static_accel_shutdown();
 
     MI_DECLARE_CLASS()
-protected:
-    /// Virtual destructor
-    virtual ~Scene();
 
+protected:
     /// Unmarks all shapes as dirty
     void clear_shapes_dirty();
 
@@ -654,7 +650,7 @@ SurfaceInteraction<Float, Spectrum>::emitter(const Scene *scene, Mask active) co
         return is_valid() ? shape->emitter() : scene->environment();
     } else {
         EmitterPtr emitter = shape->emitter(active);
-        if (scene->environment())
+        if (scene && scene->environment())
             emitter = dr::select(is_valid(), emitter, scene->environment() & active);
         return emitter;
     }

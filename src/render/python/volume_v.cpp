@@ -2,58 +2,67 @@
 #include <mitsuba/python/python.h>
 #include <mitsuba/core/properties.h>
 
+#include <array>
+#include <nanobind/trampoline.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/array.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/stl/pair.h>
+
 /// Trampoline for derived types implemented in Python
 MI_VARIANT class PyVolume : public Volume<Float, Spectrum> {
 public:
     MI_IMPORT_TYPES(Volume)
+    NB_TRAMPOLINE(Volume, 8);
 
     PyVolume(const Properties &props) : Volume(props) { };
 
     UnpolarizedSpectrum eval(const Interaction3f &it,
                              Mask active = true) const override {
-        PYBIND11_OVERRIDE_PURE(UnpolarizedSpectrum, Volume, eval, it, active);
+        NB_OVERRIDE_PURE(eval, it, active);
     }
 
     Float eval_1(const Interaction3f &it, Mask active = true) const override {
-        PYBIND11_OVERRIDE_PURE(Float, Volume, eval_1, it, active);
+        NB_OVERRIDE_PURE(eval_1, it, active);
     }
 
     Vector3f eval_3(const Interaction3f &it,
                     Mask active = true) const override {
-        PYBIND11_OVERRIDE_PURE(Vector3f, Volume, eval_3, it, active);
+        NB_OVERRIDE_PURE(eval_3, it, active);
     }
 
     dr::Array<Float, 6> eval_6(const Interaction3f &it,
                                Mask active = true) const override {
         using Return = dr::Array<Float, 6>;
-        PYBIND11_OVERRIDE_PURE(Return, Volume, eval_6, it, active);
+        NB_OVERRIDE_PURE(eval_6, it, active);
     }
 
     std::pair<UnpolarizedSpectrum, Vector3f>
     eval_gradient(const Interaction3f &it, Mask active = true) const override {
         using Return = std::pair<UnpolarizedSpectrum, Vector3f>;
-        PYBIND11_OVERRIDE_PURE(Return, Volume, eval_gradient, it, active);
+        NB_OVERRIDE_PURE(eval_gradient, it, active);
     }
 
     ScalarFloat max() const override {
-        PYBIND11_OVERRIDE_PURE(ScalarFloat, Volume, max);
+        NB_OVERRIDE_PURE(max);
     }
 
     ScalarVector3i resolution() const override {
-        PYBIND11_OVERRIDE(ScalarVector3i, Volume, resolution);
+        NB_OVERRIDE(resolution);
     }
 
     std::string to_string() const override {
-        PYBIND11_OVERRIDE(std::string, Volume, to_string);
+        NB_OVERRIDE(to_string);
     }
 };
 
 MI_PY_EXPORT(Volume) {
     MI_PY_IMPORT_TYPES(Volume)
     using PyVolume = PyVolume<Float, Spectrum>;
+    using Properties = PropertiesV<Float>;
 
     MI_PY_TRAMPOLINE_CLASS(PyVolume, Volume, Object)
-        .def(py::init<const Properties &>(), "props"_a)
+        .def(nb::init<const Properties &>(), "props"_a)
         .def_method(Volume, resolution)
         .def_method(Volume, bbox)
         .def_method(Volume, channel_count)
@@ -73,7 +82,7 @@ MI_PY_EXPORT(Volume) {
                     dr::Array<Float, 6> result = volume.eval_6(it, active);
                     std::array<Float, 6> output;
                     for (size_t i = 0; i < 6; ++i)
-                        output[i] = std::move(result[i]);
+                        output[i] = std::move(result.data()[i]);
                     return output;
                 }, "it"_a, "active"_a = true, D(Volume, eval_6))
         .def("eval_gradient", &Volume::eval_gradient, "it"_a, "active"_a = true,

@@ -123,7 +123,7 @@ The exact camera position and orientation is most easily expressed using the
 
         'type': 'thinlens',
         'fov': 45,
-        'to_world': mi.ScalarTransform4f.look_at(
+        'to_world': mi.ScalarTransform4f().look_at(
             origin=[1, 1, 1],
             target=[1, 2, 1],
             up=[0, 0, 1]
@@ -155,7 +155,7 @@ public:
 
         m_aperture_radius = props.get<ScalarFloat>("aperture_radius");
 
-        if (dr::all(dr::eq(m_aperture_radius, 0.f))) {
+        if (dr::all(m_aperture_radius == 0.f)) {
             Log(Warn, "Can't have a zero aperture radius -- setting to %f", dr::Epsilon<Float>);
             m_aperture_radius = dr::Epsilon<Float>;
         }
@@ -343,7 +343,7 @@ public:
         ds.dist = dist;
         ds.n    = trafo * Vector3f(0.f, 0.f, 1.f);
 
-        Float aperture_pdf = dr::rcp(dr::Pi<Float> * dr::sqr(m_aperture_radius));
+        Float aperture_pdf = dr::rcp(dr::Pi<Float> * dr::square(m_aperture_radius));
         ds.pdf = dr::select(valid, aperture_pdf * dist * dist * inv_ct, 0.f);
 
         return { ds, Spectrum(value * inv_dist * inv_dist) };

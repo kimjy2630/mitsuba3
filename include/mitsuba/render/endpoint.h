@@ -4,6 +4,7 @@
 #include <mitsuba/core/profiler.h>
 #include <mitsuba/render/records.h>
 #include <mitsuba/render/shape.h>
+#include <mitsuba/render/medium.h>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -58,6 +59,9 @@ public:
     // =============================================================
     //! @{ \name Wavelength sampling interface
     // =============================================================
+
+    /// Destructor
+    ~Endpoint();
 
     /**
      * \brief Importance sample a set of wavelengths according to the
@@ -226,12 +230,7 @@ public:
      * However, the ability to re-evaluate the contribution of a generated
      * sample is important for differentiable rendering. For example, we might
      * want to track derivatives in the sampled direction (<tt>ds.d</tt>)
-     * without also differentiating the sampling technique. Alternatively (or
-     * additionally), it may be necessary to apply a spherical
-     * reparameterization to <tt>ds.d</tt>  to handle visibility-induced
-     * discontinuities during differentiation. Both steps require re-evaluating
-     * the contribution of the emitter while tracking derivative information
-     * through the calculation.
+     * without also differentiating the sampling technique.
      *
      * In contrast to \ref pdf_direction(), evaluating this function can yield
      * a nonzero result in the case of emission profiles containing a Dirac
@@ -386,12 +385,10 @@ public:
 
     void parameters_changed(const std::vector<std::string> &keys = {}) override;
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::Endpoint)
     MI_DECLARE_CLASS()
+
 protected:
     Endpoint(const Properties &props);
-
-    virtual ~Endpoint();
 
 protected:
     field<Transform4f, ScalarTransform4f> m_to_world;

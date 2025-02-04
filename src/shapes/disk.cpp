@@ -101,10 +101,8 @@ public:
                 ScalarTransform4f::scale(ScalarVector3f(1.f, 1.f, -1.f));
 
         m_discontinuity_types = (uint32_t) DiscontinuityFlags::PerimeterType;
-        dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
 
         m_shape_type = ShapeType::Disk;
-        dr::set_attr(this, "shape_type", m_shape_type);
 
         update();
         initialize();
@@ -152,7 +150,7 @@ public:
         ScalarPoint3f c = to_world * ScalarPoint3f(0.f, 0.f, 0.f);
         ScalarVector3f u = to_world * ScalarVector3f(1.f, 0.f, 0.f);
         ScalarVector3f v = to_world * ScalarVector3f(0.f, 1.f, 0.f);
-        ScalarVector3f e = dr::sqrt(dr::sqr(u) + dr::sqr(v));
+        ScalarVector3f e = dr::sqrt(dr::square(u) + dr::square(v));
 
         return ScalarBoundingBox3f(
             dr::minimum(c - e, c + e),
@@ -162,7 +160,7 @@ public:
 
     Float surface_area() const override {
         // First compute height of the ellipse
-        Float h = dr::sqrt(dr::sqr(m_dv) - dr::sqr(dr::dot(m_dv * m_frame.t, m_frame.s)));
+        Float h = dr::sqrt(dr::square(m_dv) - dr::square(dr::dot(m_dv * m_frame.t, m_frame.s)));
         return dr::Pi<ScalarFloat> * m_du * h;
     }
 
@@ -348,7 +346,7 @@ public:
 
     std::tuple<DynamicBuffer<UInt32>, DynamicBuffer<Float>>
     precompute_silhouette(const ScalarPoint3f &/*viewpoint*/) const override {
-        DynamicBuffer<UInt32> indices(DiscontinuityFlags::PerimeterType);
+        DynamicBuffer<UInt32> indices((uint32_t)DiscontinuityFlags::PerimeterType);
         DynamicBuffer<Float> weights(1.f);
 
         return {indices, weights};
@@ -501,8 +499,8 @@ public:
             si.uv = Point2f(r, v);
 
             if (likely(has_flag(ray_flags, RayFlags::dPdUV))) {
-                Float cos_phi = dr::select(dr::neq(r, 0.f), prim_uv.x() * inv_r, 1.f),
-                      sin_phi = dr::select(dr::neq(r, 0.f), prim_uv.y() * inv_r, 0.f);
+                Float cos_phi = dr::select(r != 0.f, prim_uv.x() * inv_r, 1.f),
+                      sin_phi = dr::select(r != 0.f, prim_uv.y() * inv_r, 0.f);
 
                 si.dp_du = to_world * Vector3f( cos_phi, sin_phi, 0.f);
                 si.dp_dv = to_world * Vector3f(-sin_phi, cos_phi, 0.f);

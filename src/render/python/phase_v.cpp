@@ -2,11 +2,18 @@
 #include <mitsuba/render/medium.h>
 #include <mitsuba/render/phase.h>
 #include <mitsuba/python/python.h>
+#include <nanobind/trampoline.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/pair.h>
+#include <nanobind/stl/list.h>
+#include <drjit/python.h>
 
 /// Trampoline for derived types implemented in Python
 MI_VARIANT class PyPhaseFunction : public PhaseFunction<Float, Spectrum> {
 public:
     MI_IMPORT_TYPES(PhaseFunction, PhaseFunctionContext)
+    NB_TRAMPOLINE(PhaseFunction, 7);
 
     PyPhaseFunction(const Properties &props) : PhaseFunction(props) {}
 
@@ -15,7 +22,7 @@ public:
                                                  Float sample1, const Point2f &sample2,
                                                  Mask active) const override {
         using Return = std::tuple<Vector3f, Spectrum, Float>;
-        PYBIND11_OVERRIDE_PURE(Return, PhaseFunction, sample, ctx, mi, sample1, sample2, active);
+        NB_OVERRIDE_PURE(sample, ctx, mi, sample1, sample2, active);
     }
 
     std::pair<Spectrum, Float> eval_pdf(const PhaseFunctionContext &ctx,
@@ -23,27 +30,27 @@ public:
                                         const Vector3f &wo,
                                         Mask active) const override {
         using Return = std::pair<Spectrum, Float>;
-        PYBIND11_OVERRIDE_PURE(Return, PhaseFunction, eval_pdf, ctx, mi, wo, active);
+        NB_OVERRIDE_PURE(eval_pdf, ctx, mi, wo, active);
     }
 
     Float projected_area(const MediumInteraction3f &mi, Mask active) const override {
-        PYBIND11_OVERRIDE(Float, PhaseFunction, projected_area, mi, active);
+        NB_OVERRIDE(projected_area, mi, active);
     }
 
     Float max_projected_area() const override {
-        PYBIND11_OVERRIDE(Float, PhaseFunction, max_projected_area);
+        NB_OVERRIDE(max_projected_area);
     }
 
     std::string to_string() const override {
-        PYBIND11_OVERRIDE_PURE(std::string, PhaseFunction, to_string);
+        NB_OVERRIDE_PURE(to_string);
     }
 
     void traverse(TraversalCallback *cb) override {
-        PYBIND11_OVERRIDE(void, PhaseFunction, traverse, cb);
+        NB_OVERRIDE(traverse, cb);
     }
 
     void parameters_changed(const std::vector<std::string> &keys) override {
-        PYBIND11_OVERRIDE(void, PhaseFunction, parameters_changed, keys);
+        NB_OVERRIDE(parameters_changed, keys);
     }
 
     using PhaseFunction::m_flags;
@@ -77,20 +84,18 @@ template <typename Ptr, typename Cls> void bind_phase_generic(Cls &cls) {
             "active"_a = true, D(PhaseFunction, flags))
        .def("component_count", [](Ptr ptr, Mask active) { return ptr->component_count(active); },
             "active"_a = true, D(PhaseFunction, component_count));
-
-    if constexpr (dr::is_array_v<Ptr>)
-        bind_drjit_ptr_array(cls);
 }
 
 MI_PY_EXPORT(PhaseFunction) {
     MI_PY_IMPORT_TYPES(PhaseFunction, PhaseFunctionContext, PhaseFunctionPtr)
     using PyPhaseFunction = PyPhaseFunction<Float, Spectrum>;
+    using Properties = PropertiesV<Float>;
 
     m.def("has_flag", [](uint32_t flags, PhaseFunctionFlags f) { return has_flag(flags, f); });
     m.def("has_flag", [](UInt32   flags, PhaseFunctionFlags f) { return has_flag(flags, f); });
 
-    py::class_<PhaseFunctionContext>(m, "PhaseFunctionContext", D(PhaseFunctionContext))
-        .def(py::init<Sampler*, TransportMode>(), "sampler"_a,
+    nb::class_<PhaseFunctionContext>(m, "PhaseFunctionContext", D(PhaseFunctionContext))
+        .def(nb::init<Sampler*, TransportMode>(), "sampler"_a = nb::none(),
                 "mode"_a = TransportMode::Radiance, D(PhaseFunctionContext, PhaseFunctionContext))
         .def_field(PhaseFunctionContext, mode,      D(PhaseFunctionContext, mode))
         .def_field(PhaseFunctionContext, sampler,   D(PhaseFunctionContext, sampler))
@@ -100,30 +105,20 @@ MI_PY_EXPORT(PhaseFunction) {
         .def_repr(PhaseFunctionContext);
 
     auto phase =
-        py::class_<PhaseFunction, PyPhaseFunction, Object, ref<PhaseFunction>>(
-            m, "PhaseFunction", D(PhaseFunction))
-            .def(py::init<const Properties &>())
-            .def("flags", py::overload_cast<size_t, Mask>(&PhaseFunction::flags, py::const_),
+        MI_PY_TRAMPOLINE_CLASS(PyPhaseFunction, PhaseFunction, Object)
+            .def(nb::init<const Properties &>())
+            .def("flags", nb::overload_cast<size_t, Mask>(&PhaseFunction::flags, nb::const_),
                  "index"_a, "active"_a = true, D(PhaseFunction, flags, 2))
             .def_method(PhaseFunction, id)
-            .def_property("m_flags",
-                [](PyPhaseFunction &phase){ return phase.m_flags; },
-                [](PyPhaseFunction &phase, uint32_t flags){
-                    phase.m_flags = flags;
-                    dr::set_attr(&phase, "flags", flags);
-                }
-            )
+            .def_field(PyPhaseFunction, m_flags, D(PhaseFunction, m_flags))
             .def("__repr__", &PhaseFunction::to_string);
 
     bind_phase_generic<PhaseFunction *>(phase);
 
     if constexpr (dr::is_array_v<PhaseFunctionPtr>) {
-        py::object dr = py::module_::import("drjit"),
-                   dr_array = dr.attr("ArrayBase");
-
-        py::class_<PhaseFunctionPtr> cls(m, "PhaseFunctionPtr", dr_array);
-        bind_phase_generic<PhaseFunctionPtr>(cls);
-        pybind11_type_alias<UInt32, dr::replace_scalar_t<UInt32, PhaseFunctionFlags>>();
+        dr::ArrayBinding b;
+        auto phase_ptr = dr::bind_array_t<PhaseFunctionPtr>(b, m, "PhaseFunctionPtr");
+        bind_phase_generic<PhaseFunctionPtr>(phase_ptr);
     }
 
     MI_PY_REGISTER_OBJECT("register_phasefunction", PhaseFunction)

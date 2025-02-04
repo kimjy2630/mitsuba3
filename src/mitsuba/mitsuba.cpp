@@ -267,7 +267,7 @@ int main(int argc, char *argv[]) {
             if (*arg_optim_lev) {
                 int lev = arg_optim_lev->as_int();
                 jit_set_flag(JitFlag::VCallDeduplicate, lev > 0);
-                jit_set_flag(JitFlag::ConstProp, lev > 1);
+                jit_set_flag(JitFlag::ConstantPropagation, lev > 1);
                 jit_set_flag(JitFlag::ValueNumbering, lev > 2);
                 jit_set_flag(JitFlag::VCallOptimize, lev > 3);
                 jit_set_flag(JitFlag::LoopOptimize, lev > 4);
@@ -402,6 +402,7 @@ int main(int argc, char *argv[]) {
     color_management_static_shutdown();
     Profiler::static_shutdown();
     Bitmap::static_shutdown();
+    StructConverter::static_shutdown();
     Logger::static_shutdown();
     Thread::static_shutdown();
     Class::static_shutdown();

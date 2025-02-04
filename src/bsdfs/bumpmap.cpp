@@ -112,7 +112,6 @@ public:
         for (size_t i = 0; i < m_nested_bsdf->component_count(); ++i)
             m_components.push_back(m_nested_bsdf->flags(i));
         m_flags = m_nested_bsdf->flags();
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -134,7 +133,7 @@ public:
         perturbed_si.wi = perturbed_si.to_local(si.wi);
         auto [bs, weight] = m_nested_bsdf->sample(ctx, perturbed_si,
                                                   sample1, sample2, active);
-        active &= dr::any(dr::neq(unpolarized_spectrum(weight), 0.f));
+        active &= dr::any(unpolarized_spectrum(weight) != 0.f);
 
         // Transform sampled 'wo' back to original frame and check orientation
         Vector3f perturbed_wo = perturbed_si.to_world(bs.wo);

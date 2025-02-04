@@ -1,6 +1,6 @@
 #pragma once
 
-#include <drjit/vcall.h>
+#include <drjit/call.h>
 #include <mitsuba/render/records.h>
 #include <mitsuba/core/spectrum.h>
 #include <mitsuba/core/transform.h>
@@ -185,7 +185,7 @@ struct SilhouetteSample : public PositionSample<Float_, Spectrum_> {
 
     /// Is the current boundary segment valid=
     Mask is_valid() const {
-        return dr::neq(discontinuity_type, (uint32_t) DiscontinuityFlags::Empty);
+        return discontinuity_type != (uint32_t) DiscontinuityFlags::Empty;
     }
 
     /**
@@ -228,6 +228,9 @@ public:
     using ScalarSize  = uint32_t;
     using Index = UInt32;
     using ScalarRay3f = Ray<ScalarPoint3f, Spectrum>;
+
+    /// Destructor
+    ~Shape();
 
     // =============================================================
     //! @{ \name Sampling routines
@@ -937,20 +940,21 @@ public:
     friend class Scene<Float, Spectrum>;
     friend class ShapeGroup<Float, Spectrum>;
 
-    /// Return whether any shape's parameters require gradients (default return false)
+    /** \brief Return whether any shape's parameters that introduce visibility
+     *  discontinuities require gradients (default return false)
+     */
     virtual bool parameters_grad_enabled() const;
 
     //! @}
     // =============================================================
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::Shape)
-
     MI_DECLARE_CLASS()
+
 protected:
     Shape(const Properties &props);
     inline Shape() { }
-    virtual ~Shape();
 
+protected:
     virtual void initialize();
     std::string get_children_string() const;
 protected:
@@ -982,6 +986,9 @@ protected:
 protected:
     /// True if the shape's geometry has changed
     bool m_dirty = true;
+
+    /// True if the shape has called iniatlize() at least once
+    bool m_initialized = false;
 };
 
 // -----------------------------------------------------------------------
@@ -1072,39 +1079,40 @@ NAMESPACE_END(mitsuba)
 //! @{ \name Dr.Jit support for vectorized function calls
 // -----------------------------------------------------------------------
 
-DRJIT_VCALL_TEMPLATE_BEGIN(mitsuba::Shape)
-    DRJIT_VCALL_METHOD(compute_surface_interaction)
-    DRJIT_VCALL_METHOD(has_attribute)
-    DRJIT_VCALL_METHOD(eval_attribute)
-    DRJIT_VCALL_METHOD(eval_attribute_1)
-    DRJIT_VCALL_METHOD(eval_attribute_3)
-    DRJIT_VCALL_METHOD(eval_parameterization)
-    DRJIT_VCALL_METHOD(ray_intersect_preliminary)
-    DRJIT_VCALL_METHOD(ray_intersect)
-    DRJIT_VCALL_METHOD(ray_test)
-    DRJIT_VCALL_METHOD(sample_position)
-    DRJIT_VCALL_METHOD(pdf_position)
-    DRJIT_VCALL_METHOD(sample_direction)
-    DRJIT_VCALL_METHOD(pdf_direction)
-    DRJIT_VCALL_METHOD(sample_silhouette)
-    DRJIT_VCALL_METHOD(invert_silhouette_sample)
-    DRJIT_VCALL_METHOD(primitive_silhouette_projection)
-    DRJIT_VCALL_METHOD(differential_motion)
-    DRJIT_VCALL_METHOD(sample_precomputed_silhouette)
-    DRJIT_VCALL_METHOD(surface_area)
-    DRJIT_VCALL_GETTER(emitter, const typename Class::Emitter *)
-    DRJIT_VCALL_GETTER(sensor, const typename Class::Sensor *)
-    DRJIT_VCALL_GETTER(bsdf, const typename Class::BSDF *)
-    DRJIT_VCALL_GETTER(interior_medium, const typename Class::Medium *)
-    DRJIT_VCALL_GETTER(exterior_medium, const typename Class::Medium *)
-    DRJIT_VCALL_GETTER(silhouette_discontinuity_types, uint32_t)
-    DRJIT_VCALL_GETTER(silhouette_sampling_weight, float)
-    DRJIT_VCALL_GETTER(shape_type, uint32_t)
-    auto is_emitter() const { return neq(emitter(), nullptr); }
-    auto is_sensor() const { return neq(sensor(), nullptr); }
-    auto is_medium_transition() const { return neq(interior_medium(), nullptr) ||
-                                               neq(exterior_medium(), nullptr); }
-DRJIT_VCALL_TEMPLATE_END(mitsuba::Shape)
+MI_CALL_TEMPLATE_BEGIN(Shape)
+    DRJIT_CALL_METHOD(compute_surface_interaction)
+    DRJIT_CALL_METHOD(has_attribute)
+    DRJIT_CALL_METHOD(eval_attribute)
+    DRJIT_CALL_METHOD(eval_attribute_1)
+    DRJIT_CALL_METHOD(eval_attribute_3)
+    DRJIT_CALL_METHOD(eval_parameterization)
+    DRJIT_CALL_METHOD(ray_intersect_preliminary)
+    DRJIT_CALL_METHOD(ray_intersect)
+    DRJIT_CALL_METHOD(ray_test)
+    DRJIT_CALL_METHOD(sample_position)
+    DRJIT_CALL_METHOD(pdf_position)
+    DRJIT_CALL_METHOD(sample_direction)
+    DRJIT_CALL_METHOD(pdf_direction)
+    DRJIT_CALL_METHOD(sample_silhouette)
+    DRJIT_CALL_METHOD(invert_silhouette_sample)
+    DRJIT_CALL_METHOD(primitive_silhouette_projection)
+    DRJIT_CALL_METHOD(differential_motion)
+    DRJIT_CALL_METHOD(sample_precomputed_silhouette)
+    DRJIT_CALL_METHOD(surface_area)
+    DRJIT_CALL_GETTER(emitter)
+    DRJIT_CALL_GETTER(sensor)
+    DRJIT_CALL_GETTER(bsdf)
+    DRJIT_CALL_GETTER(interior_medium)
+    DRJIT_CALL_GETTER(exterior_medium)
+    DRJIT_CALL_GETTER(silhouette_discontinuity_types)
+    DRJIT_CALL_GETTER(silhouette_sampling_weight)
+    DRJIT_CALL_GETTER(shape_type)
+    auto is_emitter() const { return emitter() != nullptr; }
+    auto is_sensor() const { return sensor() != nullptr; }
+    auto is_mesh() const { return shape_type() == (uint32_t) mitsuba::ShapeType::Mesh; }
+    auto is_medium_transition() const { return interior_medium() != nullptr ||
+                                               exterior_medium() != nullptr; }
+MI_CALL_TEMPLATE_END(Shape)
 
 //! @}
 // -----------------------------------------------------------------------

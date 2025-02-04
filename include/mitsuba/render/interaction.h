@@ -115,18 +115,25 @@ struct Interaction {
                 const Point3f &p, const Normal3f &n = 0.f)
         : t(t), time(time), wavelengths(wavelengths), p(p), n(n) { }
 
+    /// Virtual destructor
+    virtual ~Interaction() = default;
+
     /**
      * This callback method is invoked by dr::zeros<>, and takes care of fields that deviate
      * from the standard zero-initialization convention. In this particular class, the ``t``
      * field should be set to an infinite value to mark invalid intersection records.
      */
-    void zero_(size_t size = 1) {
-        t = dr::full<Float>(dr::Infinity<Float>, size);
+    virtual void zero_(size_t size = 1) {
+        t           = dr::full<Float>(dr::Infinity<Float>, size);
+        time        = dr::zeros<Float>(size);
+        wavelengths = dr::zeros<Wavelength>(size);
+        p           = dr::zeros<Point3f>(size);
+        n           = dr::zeros<Normal3f>(size);
     }
 
     /// Is the current interaction valid?
     Mask is_valid() const {
-        return dr::neq(t, dr::Infinity<Float>);
+        return t != dr::Infinity<Float>;
     }
 
     /// Spawn a semi-infinite ray towards the given direction
@@ -241,13 +248,39 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
           sh_frame(Frame3f(ps.n)), dp_du(0), dp_dv(0), dn_du(0), dn_dv(0),
           duv_dx(0), duv_dy(0), wi(0), prim_index(0) {}
 
+    /**
+     * This callback method is invoked by dr::zeros<>, and takes care of fields that deviate
+     * from the standard zero-initialization convention.
+     */
+    void zero_(size_t size = 1) override {
+        Interaction<Float_, Spectrum_>::zero_(size);
+        uv          = dr::zeros<Point2f>(size);
+        sh_frame    = dr::zeros<Frame3f>(size);
+        dp_du       = dr::zeros<Vector3f>(size);
+        dp_dv       = dr::zeros<Vector3f>(size);
+        dn_du       = dr::zeros<Vector3f>(size);
+        dn_dv       = dr::zeros<Vector3f>(size);
+        duv_dx      = dr::zeros<Vector2f>(size);
+        duv_dy      = dr::zeros<Vector2f>(size);
+        wi          = dr::zeros<Vector3f>(size);
+        prim_index  = dr::zeros<Index>(size);
+
+        if constexpr (dr::is_jit_v<Float_>) {
+            shape       = dr::zeros<ShapePtr>(size);
+            instance    = dr::zeros<ShapePtr>(size);
+        } else {
+            shape       = nullptr;
+            instance    = nullptr;
+        }
+    }
+
     /// Initialize local shading frame using Gram-schmidt orthogonalization
     void initialize_sh_frame() {
         sh_frame.s = dr::normalize(
             dr::fmadd(sh_frame.n, -dr::dot(sh_frame.n, dp_du), dp_du));
 
         // When dp_du is invalid, use an orthonormal basis
-        Mask singularity_mask = dr::all(dr::eq(dp_du, 0.f));
+        Mask singularity_mask = dr::all(dp_du == 0.f);
         if (unlikely(dr::any_or<true>(singularity_mask)))
             sh_frame.s[singularity_mask] = coordinate_system(sh_frame.n).first;
 
@@ -440,14 +473,14 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
         if constexpr (dr::is_dynamic_v<Float>)
             return dr::width(duv_dx) > 0 || dr::width(duv_dy) > 0;
         else
-            return dr::any_nested(dr::neq(duv_dx, 0.f) || dr::neq(duv_dy, 0.f));
+            return dr::any_nested((duv_dx != 0.f) || (duv_dy != 0.f));
     }
 
     bool has_n_partials() const {
         if constexpr (dr::is_dynamic_v<Float>)
             return dr::width(dn_du) > 0 || dr::width(dn_dv) > 0;
         else
-            return dr::any_nested(dr::neq(dn_du, 0.f) || dr::neq(dn_dv, 0.f));
+            return dr::any_nested((dn_du != 0.f) || (dn_dv != 0.f));
     }
 
     /**
@@ -481,6 +514,12 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
         wi = dr::select(active, to_local(-ray.d), -ray.d);
 
         duv_dx = duv_dy = dr::zeros<Point2f>();
+    }
+
+    /// Convenience operator for masking
+    template <typename Array, drjit::enable_if_mask_t<Array> = 0>
+    auto operator[](const Array &array) {
+        return dr::masked(*this, array);
     }
 
     //! @}
@@ -536,6 +575,27 @@ struct MediumInteraction : Interaction<Float_, Spectrum_> {
     // =============================================================
     //! @{ \name Methods
     // =============================================================
+
+    /**
+     * This callback method is invoked by dr::zeros<>, and takes care of fields that deviate
+     * from the standard zero-initialization convention.
+     */
+    void zero_(size_t size = 1) override {
+        Interaction<Float_, Spectrum_>::zero_(size);
+        sh_frame            = dr::zeros<Frame3f>(size);
+        wi                  = dr::zeros<Vector3f>(size);
+        sigma_s             = dr::zeros<UnpolarizedSpectrum>(size);
+        sigma_n             = dr::zeros<UnpolarizedSpectrum>(size);
+        sigma_t             = dr::zeros<UnpolarizedSpectrum>(size);
+        combined_extinction = dr::zeros<UnpolarizedSpectrum>(size);
+        mint                = dr::zeros<Float>(size);
+
+        if constexpr (dr::is_jit_v<Float_>) {
+            medium      = dr::zeros<MediumPtr>(size);
+        } else {
+            medium      = nullptr;
+        }
+    }
 
     /// Convert a local shading-space (defined by ``wi``) vector into world space
     Vector3f to_world(const Vector3f &v) const {
@@ -621,12 +681,23 @@ struct PreliminaryIntersection {
      * field should be set to an infinite value to mark invalid intersection records.
      */
     void zero_(size_t size = 1) {
-        t = dr::full<Float>(dr::Infinity<Float>, size);
+        t           = dr::full<Float>(dr::Infinity<Float>, size);
+        prim_uv     = dr::zeros<Point2f>(size);
+        prim_index  = dr::zeros<Index>(size);
+        shape_index = dr::zeros<Index>(size);
+
+        if constexpr (dr::is_jit_v<Float_>) {
+            shape       = dr::zeros<ShapePtr>(size);
+            instance    = dr::zeros<ShapePtr>(size);
+        } else {
+            shape       = nullptr;
+            instance    = nullptr;
+        }
     }
 
     /// Is the current interaction valid?
     Mask is_valid() const {
-        return dr::neq(t, dr::Infinity<Float>);
+        return t != dr::Infinity<Float>;
     }
 
     /**
@@ -658,7 +729,7 @@ struct PreliminaryIntersection {
 
             ScopedPhase sp(ProfilerPhase::CreateSurfaceInteraction);
 
-            ShapePtr target = dr::select(dr::eq(instance, nullptr), shape, instance);
+            ShapePtr target = dr::select(instance == nullptr, shape, instance);
             SurfaceInteraction3f si =
                 target->compute_surface_interaction(ray, *this, ray_flags, 0u, active);
             si.finalize_surface_interaction(*this, ray, ray_flags, active);

@@ -115,7 +115,7 @@ points and increasing radii::
 
         'curves': {
             'type': 'bsplinecurve',
-            'to_world': mi.ScalarTransform4f.translate([1, 0, 0]).scale([2, 2, 2]),
+            'to_world': mi.ScalarTransform4f().translate([1, 0, 0]).scale([2, 2, 2]),
             'filename': 'curves.txt'
         },
 
@@ -267,11 +267,11 @@ public:
         for (size_t i = 0; i < curve_1st_idx.size(); ++i) {
             size_t next_curve_idx = i + 1 < curve_1st_idx.size() ? curve_1st_idx[i + 1] : vertices.size();
             size_t curve_segment_count = next_curve_idx - curve_1st_idx[i] - 3;
-            curves_1st_prim_idx[i] = segment_index;
+            curves_1st_prim_idx[i] = (ScalarIndex) segment_index;
             for (size_t j = 0; j < curve_segment_count; ++j)
                 indices[segment_index++] = (ScalarIndex) (curve_1st_idx[i] + j);
         }
-        curves_1st_prim_idx[curve_1st_idx.size()] = segment_index;
+        curves_1st_prim_idx[curve_1st_idx.size()] = (ScalarIndex) segment_index;
 
         m_indices = dr::load<UInt32Storage>(indices.get(), segment_count);
         m_curves_prim_idx = dr::load<UInt32Storage>(curves_1st_prim_idx.get(),
@@ -326,10 +326,8 @@ public:
         );
 
         m_discontinuity_types = (uint32_t) DiscontinuityFlags::AllTypes;
-        dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
 
         m_shape_type = ShapeType::BSplineCurve;
-        dr::set_attr(this, "shape_type", m_shape_type);
 
         initialize();
     }
@@ -365,7 +363,7 @@ public:
         Float v_global = uv.y();
         size_t segment_count = dr::width(m_indices);
         UInt32 segment_idx = dr::floor2int<UInt32>(v_global * segment_count);
-        segment_idx = dr::clamp(segment_idx, 0, segment_count - 1); // In case v_global == 1
+        segment_idx = dr::clip(segment_idx, 0, (uint32_t) segment_count - 1); // In case v_global == 1
         Float v_local = v_global * segment_count - segment_idx;
 
         pi.prim_uv.x() = v_local;
@@ -418,7 +416,7 @@ public:
             // sample a curve
             size_t curve_count = dr::width(m_curves_prim_idx) - 1;
             UInt32 curve_idx = dr::floor2int<UInt32>(sample.x() * curve_count);
-            curve_idx = dr::clamp(curve_idx, 0, curve_count - 1); // In case sample.x() == 1
+            curve_idx = dr::clip(curve_idx, 0, (uint32_t) curve_count - 1); // In case sample.x() == 1
 
             // sample either extremity of the curve
             UInt32 first_segment_idx =
@@ -481,7 +479,7 @@ public:
             // ss.n must point outwards from the curve
             Vector3f inward_dir = -n;
             dr::masked(ss.n, dr::dot(inward_dir, ss.n) > 0.f) *= -1.f;
-            inward_dir = dc_dv * dr::select(dr::eq(local_uv.y(), 0.f), 1.f, -1.f);
+            inward_dir = dc_dv * dr::select(local_uv.y() == 0.f, 1.f, -1.f);
             dr::masked(ss.n, dr::dot(inward_dir, ss.n) > 0.f) *= -1.f;
 
             ss.pdf = dr::rcp(dr::TwoPi<Float> * radius * (2 * curve_count));
@@ -534,7 +532,7 @@ public:
 
         size_t curve_count = dr::width(m_curves_prim_idx) - 1;
         UInt32 curve_idx = dr::binary_search<UInt32>(
-            0, curve_count,
+            0, (uint32_t) curve_count,
             [&](UInt32 idx) DRJIT_INLINE_LAMBDA {
                 UInt32 prim_id =
                     dr::gather<UInt32>(m_curves_prim_idx, idx, active);
@@ -633,7 +631,7 @@ public:
             // Find which curve this segment is in and project to its extremities
             size_t curve_count = dr::width(m_curves_prim_idx) - 1;
             UInt32 curve_idx = dr::binary_search<UInt32>(
-                0, curve_count,
+                0, (uint32_t) curve_count,
                 [&](UInt32 idx) DRJIT_INLINE_LAMBDA {
                     UInt32 prim_id =
                         dr::gather<UInt32>(m_curves_prim_idx, idx, active);
@@ -726,9 +724,18 @@ public:
             Mask success = active & (f_lower * f_upper < 0.f),
                  active_loop = Mask(success);
             UInt32 cnt = 0u;
-            dr::Loop<Mask> loop("B-Spline curve projection bisection", u_lower,
-                                u_upper, f_lower, f_upper, cnt, active_loop);
-            while (loop(active_loop)) {
+
+            std::tie(u_lower, u_upper, f_lower, f_upper, cnt, 
+                active_loop) = dr::while_loop(
+                std::make_tuple(u_lower, u_upper, f_lower, f_upper, cnt, 
+                active_loop),
+            [](const Float&, const Float&, const Float&, const Float&, 
+                const UInt32&, const Mask& active_loop) {
+                return active_loop;
+            },
+            [normal_eq](Float& u_lower, Float& u_upper, Float& f_lower, 
+                Float& f_upper, UInt32& cnt, Mask& active_loop) {
+
                 Float u_middle = 0.5f * (u_lower + u_upper);
                 Float f_middle = normal_eq(u_middle);
                 Mask lower = f_middle * f_lower <= 0.f;
@@ -739,7 +746,8 @@ public:
 
                 cnt += 1u;
                 active_loop &= cnt < 22u;
-            }
+            },
+            "B-Spline curve projection bisection");
 
             ss.discontinuity_type =
                 dr::select(success,
@@ -750,12 +758,12 @@ public:
             dr::masked(u_lower, u_lower > 1.f) -= 1.f;
 
             ss.uv = Point2f(u_lower, si.uv.y());
-            SurfaceInteraction3f si = eval_parameterization(
+            SurfaceInteraction3f si_ = eval_parameterization(
                 ss.uv, +RayFlags::AllNonDifferentiable, active);
-            ss.p = si.p;
-            ss.n = si.n;
+            ss.p = si_.p;
+            ss.n = si_.n;
             ss.d = dr::normalize(ss.p - viewpoint);
-            ss.prim_index = si.prim_index;
+            ss.prim_index = si_.prim_index;
 
             Vector3f dp_du, dp_dv, dn_du, dn_dv;
             std::tie(dp_du, dp_dv, dn_du, dn_dv, std::ignore, std::ignore,
@@ -800,7 +808,7 @@ public:
         // Perimeter silhouette
         size_t curve_count = dr::width(m_curves_prim_idx) - 1;
         UInt32 curve_idx = dr::floor2int<UInt32>(sample2 * curve_count);
-        curve_idx = dr::clamp(curve_idx, 0, curve_count - 1); // In case sample2 == 1
+        curve_idx = dr::clip(curve_idx, 0, (uint32_t) curve_count - 1); // In case sample2 == 1
 
         UInt32 first_segment_idx =
             dr::gather<UInt32>(m_curves_prim_idx, curve_idx, active);
@@ -823,7 +831,7 @@ public:
                         (local_uv.y() + si.prim_index) / dr::width(m_indices));
 
         uint32_t flags = (uint32_t) DiscontinuityFlags::PerimeterType;
-        Mask perimeter = active & dr::eq(sample1, +DiscontinuityFlags::PerimeterType);
+        Mask perimeter = active & (sample1 == +DiscontinuityFlags::PerimeterType);
         dr::masked(ss, perimeter) =
             primitive_silhouette_projection(viewpoint, si, flags, 0.f, perimeter);
         Float radius;
@@ -837,7 +845,7 @@ public:
         si.uv = Point2f(0.1f, sample2 * 2.f);
         dr::masked(si.uv, sample2 > 0.5f) = Point2f(0.6f, dr::fmsub(sample2, 2.f, 1.f));
         flags = (uint32_t) DiscontinuityFlags::InteriorType;
-        Mask interior = active & dr::eq(sample1, +DiscontinuityFlags::InteriorType);
+        Mask interior = active & (sample1 == +DiscontinuityFlags::InteriorType);
         dr::masked(ss, interior) =
             primitive_silhouette_projection(viewpoint, si, flags, 0.f, interior);
 
@@ -1126,7 +1134,7 @@ private:
               r2 = c2.w(),
               r3 = c3.w();
 
-        Float v2 = dr::sqr(v), v3 = v2 * v;
+        Float v2 = dr::square(v), v3 = v2 * v;
         Float multiplier = 1.f / 6.f;
 
         Point3f c = (-v3 + 3.f * v2 - 3.f * v + 1.f) * p0 +
@@ -1197,10 +1205,10 @@ private:
         Float norm_dc_dv = dr::norm(dc_dv);
         Vector3f cross_dc_dv_dc_dvv = dr::cross(dc_dv, dc_dvv),
                  dc_dv_normalized = dc_dv / norm_dc_dv;
-        Float sqr_norm_dc_dv = dr::sqr(norm_dc_dv),
+        Float sqr_norm_dc_dv = dr::square(norm_dc_dv),
               norm_cross_dc_dv_dc_dvv = dr::norm(cross_dc_dv_dc_dvv),
               kappa = norm_cross_dc_dv_dc_dvv / (norm_dc_dv * sqr_norm_dc_dv),
-              tau = dr::dot(dc_dvvv, cross_dc_dv_dc_dvv) / dr::sqr(norm_cross_dc_dv_dc_dvv);
+              tau = dr::dot(dc_dvvv, cross_dc_dv_dc_dvv) / dr::square(norm_cross_dc_dv_dc_dvv);
 
         dr::masked(tau, norm_cross_dc_dv_dc_dvv < 1e-6f) = 0.f;  // Numerical stability
         dr::masked(tau, dr::norm(dc_dvvv) < 1e-6f) = 0.f;
@@ -1244,7 +1252,7 @@ private:
         // Rescale (u: [0, 1) -> [0, 2pi), v: local -> global)
         dp_du *= dr::TwoPi<Float>;
         dp_duv *= dr::TwoPi<Float>;
-        dp_duu *= dr::sqr(dr::TwoPi<Float>);
+        dp_duu *= dr::square(dr::TwoPi<Float>);
         ScalarFloat ratio = (ScalarFloat) dr::width(m_indices),
                     ratio2 = ratio * ratio;
         dp_dv  *= ratio;
@@ -1275,8 +1283,7 @@ private:
         Vector3f guide = Vector3f(0, 0, 1);
         Vector3f v_rot = dr::normalize(
             guide - dc_dv_normalized * dr::dot(dc_dv_normalized, guide));
-        Mask singular_mask =
-            dr::eq(dr::abs(dr::dot(guide, dc_dv_normalized)), 1.f);
+        Mask singular_mask = dr::abs(dr::dot(guide, dc_dv_normalized)) == 1.f;
         dr::masked(v_rot, singular_mask) =
             Vector3f(0, 1, 0); // non-consistent at singular points
         Vector3f v_rad = dr::cross(v_rot, dc_dv_normalized);

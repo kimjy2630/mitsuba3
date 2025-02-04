@@ -1,5 +1,4 @@
 #include <random>
-#include <tuple>
 #include <mitsuba/core/ray.h>
 #include <mitsuba/core/properties.h>
 #include <mitsuba/render/bsdf.h>
@@ -105,7 +104,7 @@ public:
                      Medium, MediumPtr, PhaseFunctionContext)
 
     using WeightMatrix =
-        std::conditional_t<SpectralMis, dr::Matrix<Float, dr::array_size_v<UnpolarizedSpectrum>>,
+        std::conditional_t<SpectralMis, dr::Matrix<Float, dr::size_v<UnpolarizedSpectrum>>,
                            UnpolarizedSpectrum>;
 
     VolpathMisIntegratorImpl(const Properties &props) : Base(props) {}
@@ -114,8 +113,8 @@ public:
     Float index_spectrum(const UnpolarizedSpectrum &spec, const UInt32 &idx) const {
         Float m = spec[0];
         if constexpr (is_rgb_v<Spectrum>) { // Handle RGB rendering
-            dr::masked(m, dr::eq(idx, 1u)) = spec[1];
-            dr::masked(m, dr::eq(idx, 2u)) = spec[2];
+            dr::masked(m, idx == 1u) = spec[1];
+            dr::masked(m, idx == 2u) = spec[2];
         } else {
             DRJIT_MARK_USED(idx);
         }
@@ -135,7 +134,7 @@ public:
 
         // If there is an environment emitter and emitters are visible: all rays will be valid
         // Otherwise, it will depend on whether a valid interaction is sampled
-        Mask valid_ray = !m_hide_emitters && dr::neq(scene->environment(), nullptr);
+        Mask valid_ray = !m_hide_emitters && (scene->environment() != nullptr);
 
         // For now, don't use ray differentials
         Ray3f ray = ray_;
@@ -155,7 +154,7 @@ public:
 
         UInt32 channel = 0;
         if (is_rgb_v<Spectrum>) {
-            uint32_t n_channels = (uint32_t) dr::array_size_v<Spectrum>;
+            uint32_t n_channels = (uint32_t) dr::size_v<Spectrum>;
             channel = (UInt32) dr::minimum(sampler->next_1d(active) * n_channels, n_channels - 1);
         }
 
@@ -164,23 +163,78 @@ public:
         Mask needs_intersection = true, last_event_was_null = false;
         Interaction3f last_scatter_event = dr::zeros<Interaction3f>();
 
+        struct LoopState {
+            Mask active;
+            UInt32 depth;
+            Ray3f ray;
+            WeightMatrix p_over_f;
+            WeightMatrix p_over_f_nee;
+            Spectrum result;
+            SurfaceInteraction3f si;
+            MediumInteraction3f mei;
+            MediumPtr medium;
+            Float eta;
+            Interaction3f last_scatter_event;
+            Mask last_event_was_null;
+            Mask needs_intersection;
+            Mask specular_chain;
+            Mask valid_ray;
+            Sampler* sampler;
+
+            DRJIT_STRUCT(LoopState, active, depth, ray, p_over_f, \
+                p_over_f_nee, result, si, mei, medium, eta, last_scatter_event, \
+                last_event_was_null, needs_intersection, specular_chain, \
+                valid_ray, sampler)
+        } ls = {
+            active,
+            depth,
+            ray,
+            p_over_f,
+            p_over_f_nee,
+            result,
+            si,
+            mei,
+            medium,
+            eta,
+            last_scatter_event,
+            last_event_was_null,
+            needs_intersection,
+            specular_chain,
+            valid_ray,
+            sampler
+        };
+
         /* Set up a Dr.Jit loop (optimizes away to a normal loop in scalar mode,
            generates wavefront or megakernel renderer based on configuration).
            Register everything that changes as part of the loop here */
-        dr::Loop<Mask> loop("Volpath MIS integrator",
-                            /* loop state: */
-                            active, depth, ray, p_over_f, p_over_f_nee, result,
-                            si, mei, medium, eta, last_scatter_event, sampler,
-                            needs_intersection, specular_chain, valid_ray);
+        dr::tie(ls) = dr::while_loop(dr::make_tuple(ls),
+            [](const LoopState& ls) { return ls.active; },
+            [this, scene, channel](LoopState& ls) {
 
-        while (loop(active)) {
+            Mask& active = ls.active;
+            UInt32& depth = ls.depth;
+            Ray3f& ray = ls.ray;
+            WeightMatrix& p_over_f = ls.p_over_f;
+            WeightMatrix& p_over_f_nee = ls.p_over_f_nee;
+            Spectrum& result = ls.result;
+            SurfaceInteraction3f& si = ls.si;
+            MediumInteraction3f& mei = ls.mei;
+            MediumPtr& medium = ls.medium;
+            Float& eta = ls.eta;
+            Interaction3f& last_scatter_event = ls.last_scatter_event;
+            Mask& last_event_was_null = ls.last_event_was_null;
+            Mask& needs_intersection = ls.needs_intersection;
+            Mask& specular_chain = ls.specular_chain;
+            Mask& valid_ray = ls.valid_ray;
+            Sampler* sampler = ls.sampler;
+
             // ----------------- Handle termination of paths ------------------
 
             // Russian roulette: try to keep path weights equal to one, while accounting for the
             // solid angle compression at refractive index boundaries. Stop with at least some
             // probability to avoid  getting stuck (e.g. due to total internal reflection)
             Spectrum mis_throughput = mis_weight(p_over_f);
-            Float q = dr::minimum(dr::max(unpolarized_spectrum(mis_throughput)) * dr::sqr(eta), .95f);
+            Float q = dr::minimum(dr::max(unpolarized_spectrum(mis_throughput)) * dr::square(eta), .95f);
             Mask perform_rr = active && !last_event_was_null && (depth > (uint32_t) m_rr_depth);
             active &= !(sampler->next_1d(active) >= q && perform_rr);
             update_weights(p_over_f, dr::detach(q), 1.0f, channel, perform_rr);
@@ -188,12 +242,12 @@ public:
             last_event_was_null = false;
 
             active &= depth < (uint32_t) m_max_depth;
-            active &= dr::any(dr::neq(unpolarized_spectrum(mis_weight(p_over_f)), 0.f));
+            active &= dr::any(unpolarized_spectrum(mis_weight(p_over_f)) != 0.f);
             if (dr::none_or<false>(active))
-                break;
+                return;
 
             // ----------------------- Sampling the RTE -----------------------
-            Mask active_medium  = active && dr::neq(medium, nullptr);
+            Mask active_medium  = active && (medium != nullptr);
             Mask active_surface = active && !active_medium;
             Mask act_null_scatter = false, act_medium_scatter = false,
                  escaped_medium = false;
@@ -308,10 +362,10 @@ public:
 
             if (dr::any_or<true>(active_surface)) {
                 // ---------------- Intersection with emitters ----------------
-                Mask ray_from_camera = active_surface && dr::eq(depth, 0u);
+                Mask ray_from_camera = active_surface && (depth == 0u);
                 Mask count_direct = ray_from_camera || specular_chain;
                 EmitterPtr emitter = si.emitter(scene);
-                Mask active_e = active_surface && dr::neq(emitter, nullptr) && !(dr::eq(depth, 0u) && m_hide_emitters);
+                Mask active_e = active_surface && (emitter != nullptr) && !((depth == 0u) && m_hide_emitters);
                 if (dr::any_or<true>(active_e)) {
                     if (dr::any_or<true>(active_e && !count_direct)) {
                         // Get the PDF of sampling this emitter using next event estimation
@@ -345,7 +399,7 @@ public:
                 // ----------------------- BSDF sampling ----------------------
                 auto [bs, bsdf_weight] = bsdf->sample(ctx, si, sampler->next_1d(active_surface),
                                                    sampler->next_2d(active_surface), active_surface);
-                Mask invalid_bsdf_sample = active_surface && dr::eq(bs.pdf, 0.f);
+                Mask invalid_bsdf_sample = active_surface && (bs.pdf == 0.f);
                 active_surface &= bs.pdf > 0.f;
                 dr::masked(eta, active_surface) *= bs.eta;
 
@@ -369,9 +423,10 @@ public:
                 dr::masked(medium, has_medium_trans) = si.target_medium(ray.d);
             }
             active &= (active_surface | active_medium);
-        }
+            },
+            "Volpath MIS integrator");
 
-        return { result, valid_ray };
+        return { ls.result, ls.valid_ray };
     }
 
     template <typename Interaction>
@@ -384,8 +439,8 @@ public:
 
         auto [ds, emitter_sample_weight] = scene->sample_emitter_direction(ref_interaction, sampler->next_2d(active), false, active);
         Spectrum emitter_val = emitter_sample_weight * ds.pdf;
-        dr::masked(emitter_val, dr::eq(ds.pdf, 0.f)) = 0.f;
-        active &= dr::neq(ds.pdf, 0.f);
+        dr::masked(emitter_val, ds.pdf == 0.f) = 0.f;
+        active &= (ds.pdf != 0.f);
         update_weights(p_over_f_nee, ds.pdf, 1.0f, channel, active);
 
         if (dr::none_or<false>(active)) {
@@ -404,20 +459,59 @@ public:
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
 
         Mask needs_intersection = true;
-        dr::Loop<Mask> loop("Volpath MIS integrator emitter sampling");
-        loop.put(active, ray, total_dist, needs_intersection, medium, si,
-                 p_over_f_nee, p_over_f_uni);
-        sampler->loop_put(loop);
-        loop.init();
-        while (loop(dr::detach(active))) {
+        DirectionSample3f dir_sample = ds;
+
+        struct LoopState {
+            Mask active;
+            Ray3f ray;
+            Float total_dist;
+            Mask needs_intersection;
+            MediumPtr medium;
+            SurfaceInteraction3f si;
+            WeightMatrix p_over_f_nee;
+            WeightMatrix p_over_f_uni;
+            DirectionSample3f dir_sample;
+            Sampler* sampler;
+
+            DRJIT_STRUCT(LoopState, active, ray, total_dist, \
+                needs_intersection, medium, si, p_over_f_nee, p_over_f_uni, \
+                dir_sample, sampler)
+        } ls = {
+            active,
+            ray,
+            total_dist,
+            needs_intersection,
+            medium,
+            si,
+            p_over_f_nee,
+            p_over_f_uni,
+            dir_sample,
+            sampler
+        };
+
+        dr::tie(ls) = dr::while_loop(dr::make_tuple(ls),
+            [](const LoopState& ls) { return dr::detach(ls.active); },
+            [this, scene, channel, max_dist](LoopState& ls) {
+
+            Mask& active = ls.active;
+            Ray3f& ray = ls.ray;
+            Float& total_dist = ls.total_dist;
+            Mask& needs_intersection = ls.needs_intersection;
+            MediumPtr& medium = ls.medium;
+            SurfaceInteraction3f& si = ls.si;
+            WeightMatrix& p_over_f_nee = ls.p_over_f_nee;
+            WeightMatrix& p_over_f_uni = ls.p_over_f_uni;
+            DirectionSample3f& dir_sample = ls.dir_sample;
+            Sampler* sampler = ls.sampler;
+
             Float remaining_dist = max_dist - total_dist;
             ray.maxt = remaining_dist;
             active &= remaining_dist > 0.f;
             if (dr::none_or<false>(active))
-                break;
+                return;
 
             Mask escaped_medium = false;
-            Mask active_medium  = active && dr::neq(medium, nullptr);
+            Mask active_medium  = active && (medium != nullptr);
             Mask active_surface = active && !active_medium;
 
             if (dr::any_or<true>(active_medium)) {
@@ -439,7 +533,7 @@ public:
                     update_weights(p_over_f_uni, free_flight_pdf, tr, channel, is_spectral);
                 }
                 // Handle exceeding the maximum distance by medium sampling
-                dr::masked(total_dist, active_medium && (mei.t > remaining_dist) && mei.is_valid()) = ds.dist;
+                dr::masked(total_dist, active_medium && (mei.t > remaining_dist) && mei.is_valid()) = dir_sample.dist;
                 dr::masked(mei.t, active_medium && (mei.t > remaining_dist)) = dr::Infinity<Float>;
 
                 escaped_medium = active_medium && !mei.is_valid();
@@ -485,19 +579,21 @@ public:
 
             // Continue tracing through scene if non-zero weights exist
             if constexpr (SpectralMis)
-                active &= (active_medium || active_surface) && dr::any(dr::neq(mis_weight(p_over_f_uni), 0.f));
+                active &= (active_medium || active_surface) && dr::any(mis_weight(p_over_f_uni) != 0.f);
             else
                 active &= (active_medium || active_surface) &&
-                      (dr::any(dr::neq(unpolarized_spectrum(p_over_f_uni), 0.f)) || dr::any(dr::neq(unpolarized_spectrum(p_over_f_nee), 0.f)) );
+                          (dr::any(unpolarized_spectrum(p_over_f_uni) != 0.f) ||
+                           dr::any(unpolarized_spectrum(p_over_f_nee) != 0.f));
 
             // If a medium transition is taking place: Update the medium pointer
             Mask has_medium_trans = active_surface && si.is_medium_transition();
             if (dr::any_or<true>(has_medium_trans)) {
                 dr::masked(medium, has_medium_trans) = si.target_medium(ray.d);
             }
-        }
+        },
+        "Volpath MIS integrator emitter sampling");
 
-        return { p_over_f_nee, p_over_f_uni, emitter_val, ds};
+        return { ls.p_over_f_nee, ls.p_over_f_uni, emitter_val, dir_sample};
     }
 
     MI_INLINE
@@ -509,7 +605,7 @@ public:
         // components and multiplies them to the current values in p_over_f
         if constexpr (SpectralMis) {
             DRJIT_MARK_USED(channel);
-            for (size_t i = 0; i < dr::array_size_v<Spectrum>; ++i) {
+            for (size_t i = 0; i < dr::size_v<Spectrum>; ++i) {
                 UnpolarizedSpectrum ratio = p / f.entry(i);
                 ratio = dr::select(dr::isfinite(ratio), ratio, 0.f);
                 ratio *= p_over_f[i];
@@ -525,15 +621,15 @@ public:
 
     UnpolarizedSpectrum mis_weight(const WeightMatrix& p_over_f) const {
         if constexpr (SpectralMis) {
-            constexpr size_t n = dr::array_size_v<Spectrum>;
+            constexpr size_t n = dr::size_v<Spectrum>;
             UnpolarizedSpectrum weight(0.0f);
             for (size_t i = 0; i < n; ++i) {
                 Float sum = dr::sum(p_over_f[i]);
-                weight[i] = dr::select(dr::eq(sum, 0.f), 0.0f, n / sum);
+                weight[i] = dr::select(sum == 0.f, 0.0f, n / sum);
             }
             return weight;
         } else {
-            Mask invalid = dr::eq(min(dr::abs(p_over_f)), 0.f);
+            Mask invalid = (min(dr::abs(p_over_f)) == 0.f);
             return dr::select(invalid, 0.f, 1.f / p_over_f);
         }
     }
@@ -542,15 +638,15 @@ public:
     UnpolarizedSpectrum mis_weight(const WeightMatrix& p_over_f1, const WeightMatrix& p_over_f2) const {
         UnpolarizedSpectrum weight(0.0f);
         if constexpr (SpectralMis) {
-            constexpr size_t n = dr::array_size_v<Spectrum>;
+            constexpr size_t n = dr::size_v<Spectrum>;
             auto sum_matrix = p_over_f1 + p_over_f2;
             for (size_t i = 0; i < n; ++i) {
                 Float sum = dr::sum(sum_matrix[i]);
-                weight[i] = dr::select(dr::eq(sum, 0.f), 0.0f, n / sum);
+                weight[i] = dr::select(sum == 0.f, 0.0f, n / sum);
             }
         } else {
             auto sum = p_over_f1 + p_over_f2;
-            weight = dr::select(dr::eq(min(dr::abs(sum)), 0.f), 0.0f, 1.f / sum);
+            weight = dr::select(min(dr::abs(sum)) == 0.f, 0.0f, 1.f / sum);
         }
         return weight;
     }

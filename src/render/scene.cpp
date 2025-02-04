@@ -169,11 +169,6 @@ MI_VARIANT Scene<Float, Spectrum>::~Scene() {
     m_children.clear();
     m_integrator = nullptr;
     m_environment = nullptr;
-
-    if constexpr (dr::is_jit_v<Float>) {
-        // Clean up JIT pointer registry now that the above has happened
-        jit_registry_trim();
-    }
 }
 
 // -----------------------------------------------------------------------
@@ -268,12 +263,12 @@ Scene<Float, Spectrum>::sample_emitter_ray(Float time, Float sample1,
 
     Ray3f ray;
     Spectrum weight;
-    EmitterPtr emitter;
+    EmitterPtr emitter{};
 
     // Potentially disable inlining of emitter sampling (if there is just a single emitter)
     bool vcall_inline = true;
     if constexpr (dr::is_jit_v<Float>)
-         vcall_inline = jit_flag(JitFlag::VCallInline);
+         vcall_inline = false;
 
     size_t emitter_count = m_emitters.size();
     if (emitter_count > 1 || (emitter_count == 1 && !vcall_inline)) {
@@ -308,7 +303,7 @@ Scene<Float, Spectrum>::sample_emitter_direction(const Interaction3f &ref, const
     // Potentially disable inlining of emitter sampling (if there is just a single emitter)
     bool vcall_inline = true;
     if constexpr (dr::is_jit_v<Float>)
-         vcall_inline = jit_flag(JitFlag::VCallInline);
+         vcall_inline = false;
 
     size_t emitter_count = m_emitters.size();
     if (emitter_count > 1 || (emitter_count == 1 && !vcall_inline)) {
@@ -324,7 +319,7 @@ Scene<Float, Spectrum>::sample_emitter_direction(const Interaction3f &ref, const
         ds.pdf *= pdf_emitter(index, active);
         spec *= emitter_weight;
 
-        active &= dr::neq(ds.pdf, 0.f);
+        active &= (ds.pdf != 0.f);
 
         // Mark occluded samples as invalid if requested by the user
         if (test_visibility && dr::any_or<true>(active)) {
@@ -336,7 +331,7 @@ Scene<Float, Spectrum>::sample_emitter_direction(const Interaction3f &ref, const
         // Sample a direction towards the (single) emitter
         std::tie(ds, spec) = m_emitters[0]->sample_direction(ref, sample, active);
 
-        active &= dr::neq(ds.pdf, 0.f);
+        active &= (ds.pdf != 0.f);
 
         // Mark occluded samples as invalid if requested by the user
         if (test_visibility && dr::any_or<true>(active)) {
@@ -433,6 +428,15 @@ Scene<Float, Spectrum>::sample_silhouette(const Point3f &sample_,
     ss.pdf *= shape_weight;
     ss.scene_index = shape_idx;
 
+    /* This is an escape hatch for any failed sample. Ideally these cases should
+     * be resolved directly in each shape's `sample_silhouette`. Just in case,
+     * they are caught and ignored here. */
+    Mask to_ignore =
+        (dr::isnan(ss.p.x()) || dr::isnan(ss.p.y()) || dr::isnan(ss.p.z()) ||
+         dr::isnan(ss.d.x()) || dr::isnan(ss.d.y()) || dr::isnan(ss.d.z()) ||
+         dr::isnan(ss.n.x()) || dr::isnan(ss.n.y()) || dr::isnan(ss.n.z()));
+    dr::masked(ss, to_ignore) = dr::zeros<SilhouetteSample3f>();
+
     return ss;
 }
 
@@ -445,10 +449,9 @@ Scene<Float, Spectrum>::invert_silhouette_sample(const SilhouetteSample3f &ss,
 
     // Inverse mapping of samples on shapes that have both types
     Mask both_types_sampled =
-        dr::eq(ss.flags, (uint32_t) DiscontinuityFlags::AllTypes);
+        ss.flags == (uint32_t) DiscontinuityFlags::AllTypes;
     Mask shape_has_both_types =
-        dr::eq(ss.shape->silhouette_discontinuity_types(),
-               (uint32_t) DiscontinuityFlags::AllTypes);
+        ss.shape->silhouette_discontinuity_types() == (uint32_t) DiscontinuityFlags::AllTypes;
     Mask is_interior =
         has_flag(ss.discontinuity_type, DiscontinuityFlags::InteriorType);
     dr::masked(sample.x(), both_types_sampled && shape_has_both_types) =
@@ -594,6 +597,8 @@ Scene<Float, Spectrum>::ray_test_gpu(const Ray3f &, Mask) const {
 MI_VARIANT void Scene<Float, Spectrum>::static_accel_initialization_gpu() { }
 MI_VARIANT void Scene<Float, Spectrum>::static_accel_shutdown_gpu() { }
 #endif
+
+Class *__kdtree_class = new Class("TShapeKDTree", "Object", "", nullptr, nullptr);
 
 MI_IMPLEMENT_CLASS_VARIANT(Scene, Object, "scene")
 MI_INSTANTIATE_CLASS(Scene)

@@ -113,7 +113,6 @@ public:
         // The "transmission" BSDF component is at the last index.
         m_components.push_back(BSDFFlags::Null | BSDFFlags::FrontSide | BSDFFlags::BackSide);
         m_flags = m_nested_bsdf->flags() | m_components.back();
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -226,7 +225,7 @@ public:
     }
 
     MI_INLINE Float eval_opacity(const SurfaceInteraction3f &si, Mask active) const {
-        return dr::clamp(m_opacity->eval_1(si, active), 0.f, 1.f);
+        return dr::clip(m_opacity->eval_1(si, active), 0.f, 1.f);
     }
 
     Spectrum eval_diffuse_reflectance(const SurfaceInteraction3f &si,

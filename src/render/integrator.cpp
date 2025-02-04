@@ -20,7 +20,7 @@ NAMESPACE_BEGIN(mitsuba)
 // -----------------------------------------------------------------------------
 
 MI_VARIANT Integrator<Float, Spectrum>::Integrator(const Properties & props)
-    : m_stop(false) {
+    : m_stop(false), m_id(props.id()) {
     m_timeout = props.get<ScalarFloat>("timeout", -1.f);
 
     // Disable direct visibility of emitters if needed
@@ -49,7 +49,7 @@ Integrator<Float, Spectrum>::render_forward(Scene* scene,
                                             uint32_t spp) {
     auto forward_gradients = [&]() -> TensorXf {
         auto image = render(scene, sensor, seed, spp, true, false);
-        dr::forward_to(image.array());
+        dr::forward_to(image);
         return TensorXf(dr::grad(image.array()), 3, image.shape().data());
     };
 

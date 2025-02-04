@@ -223,7 +223,6 @@ public:
 
     SmoothConductor(const Properties &props) : Base(props) {
         m_flags = BSDFFlags::DeltaReflection | BSDFFlags::FrontSide;
-        dr::set_attr(this, "flags", m_flags);
         m_components.push_back(m_flags);
 
         m_specular_reflectance = props.texture<Texture>("specular_reflectance", 1.f);
@@ -288,7 +287,7 @@ public:
             Vector3f s_axis_out = dr::cross(n, wi_hat);
 
             // Singularity when the input & output are collinear with the normal
-            Mask collinear = dr::all(dr::eq(s_axis_in, Vector3f(0)));
+            Mask collinear = dr::all(s_axis_in == Vector3f(0));
             s_axis_in  = dr::select(collinear, Vector3f(1, 0, 0),
                                                dr::normalize(s_axis_in));
             s_axis_out = dr::select(collinear, Vector3f(1, 0, 0),

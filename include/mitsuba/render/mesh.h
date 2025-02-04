@@ -19,7 +19,7 @@ public:
     MI_IMPORT_TYPES()
     MI_IMPORT_BASE(Shape, m_to_world, mark_dirty, m_emitter, m_sensor, m_bsdf,
                    m_interior_medium, m_exterior_medium, m_is_instance,
-                   m_discontinuity_types, m_shape_type)
+                   m_discontinuity_types, m_shape_type, m_initialized)
 
     // Mesh is always stored in single precision
     using InputFloat = float;
@@ -34,12 +34,27 @@ public:
     using typename Base::ScalarIndex;
     using typename Base::Index;
 
-    /// Create a new mesh with the given vertex and face data structures
+    /** \brief Creates a zero-initialized mesh with the given vertex and face
+     * counts
+     *
+     * The vertex and face buffers can be filled using the ``mi.traverse``
+     * mechanism. When initializing these buffers through another method, an
+     * explicit call to \ref initialize must be made once all buffers are
+     * filled.
+     */
     Mesh(const std::string &name, ScalarSize vertex_count,
          ScalarSize face_count, const Properties &props = Properties(),
          bool has_vertex_normals = false, bool has_vertex_texcoords = false);
 
-    /// Must be called at the end of the constructor of Mesh plugins
+    /// Destructor
+    ~Mesh();
+
+    /** \brief Must be called once at the end of the construction of a Mesh
+     *
+     * This method computes internal data structures and notifies the parent
+     * sensor or emitter (if there is one) that this instance is their internal
+     * shape.
+     */
     void initialize() override;
 
     // =========================================================================
@@ -89,6 +104,20 @@ public:
                                 dr::mask_t<Index> active = true) const {
         using Result = dr::Array<dr::uint32_array_t<Index>, 3>;
         return dr::gather<Result>(m_faces, index, active);
+    }
+
+    /**
+     * Returns the vertex indices associated with edge \c edge_index (0..2)
+     * of triangle \c tri_index.
+     */
+    template <typename Index>
+    MI_INLINE auto edge_indices(Index tri_index, Index edge_index,
+                                dr::mask_t<Index> active = true) const {
+        using UInt32 = dr::uint32_array_t<Index>;
+        return dr::Array<UInt32, 2>(
+            dr::gather<UInt32>(m_faces, 3 * tri_index + edge_index, active),
+            dr::gather<UInt32>(m_faces, 3 * tri_index + (edge_index + 1) % 3, active)
+        );
     }
 
     /// Returns the world-space position of the vertex with index \c index
@@ -174,6 +203,15 @@ public:
 
     /// Recompute the bounding box (e.g. after modifying the vertex positions)
     void recompute_bbox();
+
+    /**
+     * /brief Build directed edge data structure to efficiently access adjacent
+     * edges.
+     *
+     * This is an implementation of the technique described in:
+     * <tt>https://www.graphics.rwth-aachen.de/media/papers/directed.pdf</tt>.
+     */
+    void build_directed_edges();
 
     // =============================================================
     //! @{ \name Shape interface implementation
@@ -335,13 +373,13 @@ public:
 
 #if defined(MI_ENABLE_EMBREE)
     /// Return the Embree version of this shape
-    virtual RTCGeometry embree_geometry(RTCDevice device) override;
+    RTCGeometry embree_geometry(RTCDevice device) override;
 #endif
 
 #if defined(MI_ENABLE_CUDA)
     using Base::m_optix_data_ptr;
-    virtual void optix_prepare_geometry() override;
-    virtual void optix_build_input(OptixBuildInput&) const override;
+    void optix_prepare_geometry() override;
+    void optix_build_input(OptixBuildInput&) const override;
 #endif
 
     /// @}
@@ -352,7 +390,7 @@ public:
     bool parameters_grad_enabled() const override;
 
     /// Return a human-readable string representation of the shape contents.
-    virtual std::string to_string() const override;
+    std::string to_string() const override;
 
     size_t vertex_data_bytes() const;
     size_t face_data_bytes() const;
@@ -360,7 +398,6 @@ public:
 protected:
     Mesh(const Properties &);
     inline Mesh() {}
-    virtual ~Mesh();
 
     /**
      * \brief Build internal tables for sampling uniformly wrt. area.
@@ -369,15 +406,6 @@ protected:
      * Thread-safe, since it uses a mutex.
      */
     void build_pmf();
-
-    /**
-     * /brief Build directed edge data structure to efficiently access adjacent
-     * edges.
-     *
-     * This is an implementation of the technique described in:
-     * <tt>https://www.graphics.rwth-aachen.de/media/papers/directed.pdf</tt>.
-     */
-    void build_directed_edges();
 
     /**
      * /brief Precompute the set of edges that could contribute to the indirect
@@ -567,3 +595,29 @@ protected:
 
 MI_EXTERN_CLASS(Mesh)
 NAMESPACE_END(mitsuba)
+
+
+// -----------------------------------------------------------------------
+//! @{ \name Dr.Jit support for vectorized function calls
+// -----------------------------------------------------------------------
+
+DRJIT_CALL_TEMPLATE_INHERITED_BEGIN(mitsuba::Mesh, mitsuba::Shape)
+    DRJIT_CALL_METHOD(face_indices)
+    DRJIT_CALL_METHOD(edge_indices)
+    DRJIT_CALL_METHOD(vertex_position)
+    DRJIT_CALL_METHOD(vertex_normal)
+    DRJIT_CALL_METHOD(vertex_texcoord)
+    DRJIT_CALL_METHOD(face_normal)
+    DRJIT_CALL_METHOD(opposite_dedge)
+    DRJIT_CALL_METHOD(ray_intersect_triangle)
+
+    DRJIT_CALL_GETTER(vertex_count)
+    DRJIT_CALL_GETTER(face_count)
+    DRJIT_CALL_GETTER(has_vertex_normals)
+    DRJIT_CALL_GETTER(has_vertex_texcoords)
+    DRJIT_CALL_GETTER(has_mesh_attributes)
+    DRJIT_CALL_GETTER(has_face_normals)
+DRJIT_CALL_INHERITED_END(mitsuba::Mesh)
+
+//! @}
+// -----------------------------------------------------------------------

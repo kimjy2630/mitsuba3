@@ -1,35 +1,30 @@
 #include <mitsuba/core/transform.h>
 #include <mitsuba/core/frame.h>
 #include <mitsuba/python/python.h>
+#include <nanobind/trampoline.h>
+#include <nanobind/stl/string.h>
 #include <drjit/dynamic.h>
 #include <drjit/tensor.h>
+#include <drjit/python.h>
 
-using Caster = py::object(*)(mitsuba::Object *);
+using Caster = nb::object(*)(mitsuba::Object *);
 extern Caster cast_object;
 
 // Trampoline for derived types implemented in Python
 class PyTraversalCallback : public TraversalCallback {
 public:
+    NB_TRAMPOLINE(TraversalCallback, 2);
+
     void put_parameter_impl(const std::string &name, void *ptr,
                             uint32_t flags, const std::type_info &type) override {
-        py::gil_scoped_acquire gil;
-        py::function overload = py::get_overload(this, "put_parameter");
-
-        if (overload)
-            overload(name, ptr, flags, (void *) &type);
-        else
-            Throw("TraversalCallback doesn't overload the method \"put_parameter\"");
+        nanobind::detail::ticket nb_ticket(nb_trampoline, "put_parameter", true);
+        nb_trampoline.base().attr(nb_ticket.key)(name, ptr, flags, (void *) &type);
     }
 
     void put_object(const std::string &name, Object *obj,
                     uint32_t flags) override {
-        py::gil_scoped_acquire gil;
-        py::function overload = py::get_overload(this, "put_object");
-
-        if (overload)
-            overload(name, cast_object(obj), flags);
-        else
-            Throw("TraversalCallback doesn't overload the method \"put_object\"");
+        nanobind::detail::ticket nb_ticket(nb_trampoline, "put_object", true);
+        nb_trampoline.base().attr(nb_ticket.key)(name, cast_object(obj), flags);
     }
 };
 
@@ -41,7 +36,8 @@ public:
     T(Vector2i); T(Vector2u); T(Vector3i); T(Vector3u); T(Point2u); T(Point3u);\
     T(Point2f); T(Point3f); T(Vector2f); T(Vector3f); T(Vector4f); T(Normal3f);\
     T(Frame3f); T(Mask); T(Matrix3f); T(Matrix4f); T(Transform3f);             \
-    T(Transform4f); T(Transform4d); T(Transform4d); T(TensorXf);               \
+    T(Transform4f); T(Transform4d); T(Transform4d); T(TensorXf); T(TensorXf16);\
+    T(TensorXf32); T(TensorXf64);                                              \
     if constexpr (!std::is_same_v<Float, ScalarFloat>) {                       \
         T(ScalarFloat32); T(ScalarFloat64); T(ScalarInt32); T(ScalarUInt32);   \
         T(ScalarColor1f); T(ScalarColor3f); T(ScalarColor1d);                  \
@@ -55,22 +51,23 @@ public:
     }
 
 /// Implementation detail of mitsuba.get_property
+/// FIXME: casted return should use rv_policy::reference_interal
 #define GET_PROPERTY_T(T)                                                      \
     if (strcmp(type.name(), typeid(T).name()) == 0)                            \
-      return py::cast((T *) ptr, py::return_value_policy::reference_internal,  \
-                      parent)
+      return nb::cast((T *) ptr, nb::rv_policy::reference_internal, parent);
 
 /// Implementation detail of mitsuba.set_property
 #define SET_PROPERTY_T(T)                                                      \
     if (strcmp(type.name(), typeid(T).name()) == 0) {                          \
-        *((T *) ptr) = py::cast<T>(value);                                     \
+        nb::handle h = nb::type<T>();                                          \
+        *((T *) ptr) = nb::cast<T>(h.is_valid() ? h(value) : value);           \
         return;                                                                \
     }
 
 /// Macro to iterate over types that can be passed to put_parameter_impl
 #define PUT_PARAMETER_IMPL_T(T)                                                \
-    if (py::isinstance<T>(value)) {                                            \
-        T v = py::cast<T>(value);                                              \
+    if (nb::isinstance<T>(value)) {                                            \
+        T v = nb::cast<T>(value);                                              \
         self->put_parameter_impl(name, &v, flags, typeid(T));                  \
     }
 
@@ -85,39 +82,48 @@ MI_PY_EXPORT(Object) {
 
     m.def(
         "get_property",
-        [](const void *ptr, void *type_, py::handle parent) -> py::object {
+        [](const void *ptr, void *type_, nb::handle parent) -> nb::object {
+            (void) parent;
             const std::type_info &type = *(const std::type_info *) type_;
             APPLY_FOR_EACH(GET_PROPERTY_T);
-            std::string name(type.name());
-            py::detail::clean_type_id(name);
-            Throw("get_property(): unsupported type \"%s\"!", name);
+            // FIXME: Unmangle type name
+            Throw("get_property(): unsupported type \"%s\"!", type.name());
         },
         "ptr"_a, "type"_a, "parent"_a);
 
     m.def(
         "set_property",
-        [](const void *ptr, void *type_, py::handle value) {
+        [](const void *ptr, void *type_, nb::handle value) {
             const std::type_info &type = *(const std::type_info *) type_;
             APPLY_FOR_EACH(SET_PROPERTY_T);
-            std::string name(type.name());
-            py::detail::clean_type_id(name);
-            Throw("set_property(): unsupported type \"%s\"!", name);
+            // FIXME: Unmangle type name
+            Throw("set_property(): unsupported type \"%s\"!", type.name());
         },
         "ptr"_a, "type"_a, "value"_a);
 
+    m.def(
+        "set_property",
+        [](nb::handle dst, nb::handle src) {
+            nb::handle h = dst.type();
+            if (nb::type_check(h)) {
+                nb::inst_replace_copy(dst, h(src));
+                return;
+            }
+            Throw("set_property(): Target property type isn't a nanobind type!");
+        },
+        "dst"_a, "src"_a);
+
     if constexpr (dr::is_array_v<ObjectPtr>) {
-        py::object dr       = py::module_::import("drjit"),
-                   dr_array = dr.attr("ArrayBase");
-        py::class_<ObjectPtr> cls(m, "ObjectPtr", dr_array, py::module_local());
-        bind_drjit_ptr_array(cls);
+        dr::ArrayBinding b;
+        auto object_ptr = dr::bind_array_t<ObjectPtr>(b, m, "ObjectPtr");
     }
 
     MI_PY_CHECK_ALIAS(TraversalCallback, "TraversalCallback") {
-        py::class_<TraversalCallback, PyTraversalCallback>(
+        nb::class_<TraversalCallback, PyTraversalCallback>(
             m, "TraversalCallback", D(TraversalCallback))
-            .def(py::init<>())
+            .def(nb::init<>())
             .def("put_parameter",
-                 [] (TraversalCallback &self_, const std::string &name, py::object &value, uint32_t flags) {
+                 [] (TraversalCallback &self_, const std::string &name, nb::object &value, uint32_t flags) {
                     PublicistTraversalCallback *self = (PublicistTraversalCallback *) &self_;
                     APPLY_FOR_EACH(PUT_PARAMETER_IMPL_T);
                  },

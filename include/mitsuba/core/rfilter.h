@@ -50,6 +50,9 @@ class MI_EXPORT_LIB ReconstructionFilter : public Object {
 public:
     MI_IMPORT_CORE_TYPES()
 
+    /// Destructor
+    ~ReconstructionFilter();
+
     /// Return the filter's width
     ScalarFloat radius() const { return m_radius; }
 
@@ -78,9 +81,6 @@ public:
 protected:
     /// Create a new reconstruction filter
     ReconstructionFilter(const Properties &props);
-
-    /// Virtual destructor
-    virtual ~ReconstructionFilter();
 
     /// Mandatory initialization prior to calls to \ref eval_discretized()
     void init_discretization();
@@ -323,7 +323,7 @@ private:
                     result += lookup(source, offset + (int32_t) j,
                                      source_stride, ch) * weights[j];
 
-                *target++ = Clamp ? dr::template clamp<Scalar>(result, min, max) : result;
+                *target++ = Clamp ? dr::template clip<Scalar>(result, min, max) : result;
             }
 
             target += target_stride;
@@ -344,7 +344,7 @@ private:
                         source[source_stride * (offset + (int32_t) j) + ch] *
                         weights[j];
 
-                *target++ = Clamp ? dr::template clamp<Scalar>(result, min, max) : result;
+                *target++ = Clamp ? dr::template clip<Scalar>(result, min, max) : result;
             }
 
             target += target_stride;
@@ -364,7 +364,7 @@ private:
                     result += lookup(source, offset + (int32_t) j,
                                      source_stride, ch) * weights[j];
 
-                *target++ = Clamp ? dr::template clamp<Scalar>(result, min, max) : result;
+                *target++ = Clamp ? dr::template clip<Scalar>(result, min, max) : result;
             }
 
             target += target_stride;
@@ -378,7 +378,7 @@ private:
         if (unlikely(pos < 0 || pos >= (int32_t) m_source_res)) {
             switch (m_bc) {
                 case FilterBoundaryCondition::Clamp:
-                    pos = dr::clamp(pos, 0, (int32_t) m_source_res - 1);
+                    pos = dr::clip(pos, 0, (int32_t) m_source_res - 1);
                     break;
 
                 case FilterBoundaryCondition::Repeat:

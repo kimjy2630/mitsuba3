@@ -11,6 +11,8 @@ public:
     MI_IMPORT_TYPES(BSDF, Medium, Emitter, Sensor, Mesh)
 
     MergeShape(const Properties &props) {
+        // Note: we are *not* calling the `Shape` constructor as we do not
+        // want to accept various properties such as `to_world`.
         std::unordered_map<Key, ref<Mesh>, key_hasher> tbl;
         size_t visited = 0, ignored = 0;
         Timer timer;
@@ -44,11 +46,13 @@ public:
         for (auto &kv : tbl) {
             if (tbl.size() == 1)
                 kv.second->set_id(props.id());
-            m_objects.push_back(kv.second);
+            m_objects.push_back((ref<Object>) kv.second);
         }
 
         Log(Info, "Collapsed %zu into %zu meshes. (took %s, %zu objects ignored)",
             visited, tbl.size(), util::time_string((float) timer.value()), ignored);
+
+        MI_REGISTRY_PUT("Shape", this);
     }
 
     std::vector<ref<Object>> expand() const override {

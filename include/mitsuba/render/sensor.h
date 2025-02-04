@@ -24,6 +24,9 @@ public:
     //! @{ \name Sensor-specific sampling functions
     // =============================================================
 
+    /// Destructor
+    ~Sensor();
+
     /**
      * \brief Importance sample a ray differential proportional to the sensor's
      * sensitivity profile.
@@ -118,7 +121,7 @@ public:
      * Therefore, this sampler should never be used for anything
      * except creating forks.
      */
-    Sampler *sampler() { return m_sampler; }
+    ref<Sampler> sampler() { return m_sampler; }
 
     /**
      * \brief Return the sensor's sampler (const version).
@@ -129,7 +132,7 @@ public:
      * Therefore, this sampler should never be used for anything
      * except creating clones.
      */
-    const Sampler *sampler() const { return m_sampler.get(); }
+    ref<const Sampler> sampler() const { return m_sampler.get(); }
 
     //! @}
     // =============================================================
@@ -147,12 +150,10 @@ public:
         Base::parameters_changed(keys);
     }
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::Sensor)
     MI_DECLARE_CLASS()
+
 protected:
     Sensor(const Properties &props);
-
-    virtual ~Sensor();
 
 protected:
     ref<Film> m_film;
@@ -189,6 +190,8 @@ public:
     MI_IMPORT_BASE(Sensor)
     MI_IMPORT_TYPES()
 
+    virtual ~ProjectiveCamera();
+
     /// Return the near clip plane distance
     ScalarFloat near_clip() const { return m_near_clip; }
 
@@ -205,10 +208,9 @@ public:
     }
 
     MI_DECLARE_CLASS()
+
 protected:
     ProjectiveCamera(const Properties &props);
-
-    virtual ~ProjectiveCamera();
 
 protected:
     ScalarFloat m_near_clip;
@@ -311,17 +313,17 @@ NAMESPACE_END(mitsuba)
 //! @{ \name Dr.Jit support for vectorized function calls
 // -----------------------------------------------------------------------
 
-DRJIT_VCALL_TEMPLATE_BEGIN(mitsuba::Sensor)
-    DRJIT_VCALL_METHOD(sample_ray)
-    DRJIT_VCALL_METHOD(sample_ray_differential)
-    DRJIT_VCALL_METHOD(sample_direction)
-    DRJIT_VCALL_METHOD(pdf_direction)
-    DRJIT_VCALL_METHOD(eval_direction)
-    DRJIT_VCALL_METHOD(sample_position)
-    DRJIT_VCALL_METHOD(pdf_position)
-    DRJIT_VCALL_METHOD(eval)
-    DRJIT_VCALL_METHOD(sample_wavelengths)
-    DRJIT_VCALL_GETTER(flags, uint32_t)
-    DRJIT_VCALL_GETTER(shape, const typename Class::Shape *)
-    DRJIT_VCALL_GETTER(medium, const typename Class::Medium *)
-DRJIT_VCALL_TEMPLATE_END(mitsuba::Sensor)
+MI_CALL_TEMPLATE_BEGIN(Sensor)
+    DRJIT_CALL_METHOD(sample_ray)
+    DRJIT_CALL_METHOD(sample_ray_differential)
+    DRJIT_CALL_METHOD(sample_direction)
+    DRJIT_CALL_METHOD(pdf_direction)
+    DRJIT_CALL_METHOD(eval_direction)
+    DRJIT_CALL_METHOD(sample_position)
+    DRJIT_CALL_METHOD(pdf_position)
+    DRJIT_CALL_METHOD(eval)
+    DRJIT_CALL_METHOD(sample_wavelengths)
+    DRJIT_CALL_GETTER(flags)
+    DRJIT_CALL_GETTER(shape)
+    DRJIT_CALL_GETTER(medium)
+MI_CALL_TEMPLATE_END(Sensor)

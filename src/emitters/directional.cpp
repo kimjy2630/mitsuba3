@@ -87,7 +87,6 @@ public:
         m_needs_sample_3 = false;
 
         m_flags      = EmitterFlags::Infinite | EmitterFlags::DeltaDirection;
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -140,7 +139,7 @@ public:
             sample_wavelengths(si, wavelength_sample, active);
 
         Spectrum weight =
-            wav_weight * dr::Pi<Float> * dr::sqr(m_bsphere.radius);
+            wav_weight * dr::Pi<Float> * dr::square(m_bsphere.radius);
 
         return { Ray3f(origin, d_global, time, wavelengths),
                  depolarizer<Spectrum>(weight) };

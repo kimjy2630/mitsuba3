@@ -7,10 +7,14 @@
 
 NAMESPACE_BEGIN(mitsuba)
 
-MI_VARIANT Medium<Float, Spectrum>::Medium() : m_is_homogeneous(false), m_has_spectral_extinction(true) {}
+MI_VARIANT Medium<Float, Spectrum>::Medium() :
+    m_is_homogeneous(false),
+    m_has_spectral_extinction(true) {
+
+    MI_REGISTRY_PUT("Medium", this);
+}
 
 MI_VARIANT Medium<Float, Spectrum>::Medium(const Properties &props) : m_id(props.id()) {
-
     for (auto &[name, obj] : props.objects(false)) {
         auto *phase = dynamic_cast<PhaseFunction *>(obj.get());
         if (phase) {
@@ -27,11 +31,14 @@ MI_VARIANT Medium<Float, Spectrum>::Medium(const Properties &props) : m_id(props
     }
 
     m_sample_emitters = props.get<bool>("sample_emitters", true);
-    dr::set_attr(this, "use_emitter_sampling", m_sample_emitters);
-    dr::set_attr(this, "phase_function", m_phase_function.get());
+
+    MI_REGISTRY_PUT("Medium", this);
 }
 
-MI_VARIANT Medium<Float, Spectrum>::~Medium() {}
+MI_VARIANT Medium<Float, Spectrum>::~Medium() {
+    if constexpr (dr::is_jit_v<Float>)
+        jit_registry_remove(this);
+}
 
 MI_VARIANT void Medium<Float, Spectrum>::traverse(TraversalCallback *callback) {
     callback->put_object("phase_function", m_phase_function.get(), +ParamFlags::Differentiable);
@@ -62,8 +69,8 @@ Medium<Float, Spectrum>::sample_interaction(const Ray3f &ray, Float sample,
     auto combined_extinction = get_majorant(mei, active);
     Float m                  = combined_extinction[0];
     if constexpr (is_rgb_v<Spectrum>) { // Handle RGB rendering
-        dr::masked(m, dr::eq(channel, 1u)) = combined_extinction[1];
-        dr::masked(m, dr::eq(channel, 2u)) = combined_extinction[2];
+        dr::masked(m, channel == 1u) = combined_extinction[1];
+        dr::masked(m, channel == 2u) = combined_extinction[2];
     } else {
         DRJIT_MARK_USED(channel);
     }

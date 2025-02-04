@@ -1,8 +1,13 @@
 #pragma once
 
 #include <mitsuba/core/platform.h>
+#include <drjit-core/jit.h>
+#include <drjit-core/traits.h>
+#include <drjit/fwd.h>
 #include <drjit/array_traits.h>
 #include <drjit/map.h>
+#include <drjit/call.h>
+#include <drjit/if_stmt.h>
 #include <vector>
 
 NAMESPACE_BEGIN(mitsuba)
@@ -16,7 +21,6 @@ namespace dr = drjit;
 
 class Object;
 class Class;
-template <typename> class ref;
 
 // class AnimatedTransform;
 class AnnotatedStream;
@@ -100,6 +104,7 @@ template <typename Float_> struct CoreAliases {
     using UInt32  = dr::uint32_array_t<Float>;
     using Int64   = dr::int64_array_t<Float>;
     using UInt64  = dr::uint64_array_t<Float>;
+    using Float16 = dr::float16_array_t<Float>;
     using Float32 = dr::float32_array_t<Float>;
     using Float64 = dr::float64_array_t<Float>;
 
@@ -177,10 +182,17 @@ template <typename Float_> struct CoreAliases {
     using Color3d = Color<Float64, 3>;
 
     using TensorXf = dr::Tensor<mitsuba::DynamicBuffer<Float>>;
+    using TensorXf16 = dr::Tensor<mitsuba::DynamicBuffer<Float16>>;
+    using TensorXf32 = dr::Tensor<mitsuba::DynamicBuffer<Float32>>;
+    using TensorXf64 = dr::Tensor<mitsuba::DynamicBuffer<Float64>>;
 
     using Texture1f = dr::Texture<Float, 1>;
     using Texture2f = dr::Texture<Float, 2>;
     using Texture3f = dr::Texture<Float, 3>;
+
+    using Texture1f16 = dr::Texture<Float16, 1>;
+    using Texture2f16 = dr::Texture<Float16, 2>;
+    using Texture3f16 = dr::Texture<Float16, 3>;
 
     /*
      * The following aliases are only used for casting to python object with PY_CAST_VARIANTS.
@@ -268,6 +280,12 @@ template <typename Float_> struct CoreAliases {
     using prefix ## Color1d              = typename prefix ## CoreAliases::Color1d;                \
     using prefix ## Color3d              = typename prefix ## CoreAliases::Color3d;                \
     using prefix ## TensorXf             = typename prefix ## CoreAliases::TensorXf;               \
+    using prefix ## TensorXf16           = typename prefix ## CoreAliases::TensorXf16;             \
+    using prefix ## TensorXf32           = typename prefix ## CoreAliases::TensorXf32;             \
+    using prefix ## TensorXf64           = typename prefix ## CoreAliases::TensorXf64;             \
+    using prefix ## Texture1f16          = typename prefix ## CoreAliases::Texture1f16;            \
+    using prefix ## Texture2f16          = typename prefix ## CoreAliases::Texture2f16;            \
+    using prefix ## Texture3f16          = typename prefix ## CoreAliases::Texture3f16;            \
     using prefix ## Texture1f            = typename prefix ## CoreAliases::Texture1f;              \
     using prefix ## Texture2f            = typename prefix ## CoreAliases::Texture2f;              \
     using prefix ## Texture3f            = typename prefix ## CoreAliases::Texture3f;
@@ -340,7 +358,7 @@ extern "C" {
 #  define MI_DECLARE_ENUM_OPERATORS(name)                                      \
    MI_DECLARE_ENUM_OPERATORS_IMPL(name,                                        \
                              [&](UInt32 a, UInt32 b) {                         \
-                                 return drjit::neq(a, b);                      \
+                                 return a != b;                                \
                              })
 #else
 # define MI_DECLARE_ENUM_OPERATORS(name)                                       \

@@ -73,6 +73,10 @@ class DirectProjectiveIntegrator(PSIntegrator):
     It is functionally equivalent with `prb_projective` when `max_depth` is set
     to be 2.
 
+    .. warning::
+        This integrator is not supported in variants which track polarization
+        states.
+
     .. tabs::
 
         .. code-tab:: python
@@ -162,11 +166,11 @@ class DirectProjectiveIntegrator(PSIntegrator):
         # If so, pick an emitter and sample a detached emitter direction
         ds_em, emitter_val = scene.sample_emitter_direction(
             si, sampler.next_2d(active_em_), test_visibility=True, active=active_em_)
-        active_em = active_em_ & dr.neq(ds_em.pdf, 0.0)
+        active_em = active_em_ & (ds_em.pdf != 0.0)
 
         with dr.resume_grad(when=not primal):
             # Evaluate the BSDF (foreshortening term included)
-            wo = dr.detach(si.to_local(ds_em.d))
+            wo = si.to_local(ds_em.d)
             bsdf_val, bsdf_pdf = bsdf.eval_pdf(bsdf_ctx, si, wo, active_em)
 
             # Re-compute some values with AD attached only in differentiable
@@ -188,7 +192,7 @@ class DirectProjectiveIntegrator(PSIntegrator):
         # Perform detached BSDF sampling
         sample_bsdf, weight_bsdf = bsdf.sample(bsdf_ctx, si, sampler.next_1d(active_next),
                                                sampler.next_2d(active_next), active_next)
-        active_bsdf = active_next & dr.any(dr.neq(weight_bsdf, 0.0))
+        active_bsdf = active_next & dr.any(weight_bsdf != 0.0)
         delta_bsdf = mi.has_flag(sample_bsdf.sampled_type, mi.BSDFFlags.Delta)
 
         # Construct the BSDF sampled ray
@@ -198,7 +202,7 @@ class DirectProjectiveIntegrator(PSIntegrator):
             # Re-compute `weight_bsdf` with AD attached only in differentiable
             # phase
             if not primal:
-                wo = dr.detach(si.to_local(ray_bsdf.d))
+                wo = si.to_local(ray_bsdf.d)
                 bsdf_val, bsdf_pdf = bsdf.eval_pdf(bsdf_ctx, si, wo, active_bsdf)
                 weight_bsdf = bsdf_val / dr.detach(bsdf_pdf)
 
@@ -362,7 +366,7 @@ class DirectProjectiveIntegrator(PSIntegrator):
         it = dr.zeros(mi.Interaction3f)
         it.p = si_boundary.p
         sensor_ds, sensor_weight = sensor.sample_direction(it, sampler.next_2d(active_i), active_i)
-        active_i &= dr.neq(sensor_ds.pdf, 0)
+        active_i &= (sensor_ds.pdf != 0)
 
         # Visibility to sensor
         cam_test_ray = si_boundary.spawn_ray_to(sensor_ds.p)
@@ -382,9 +386,11 @@ class DirectProjectiveIntegrator(PSIntegrator):
         wo_local = si_boundary.to_local(sensor_ds.d)
         bsdf_val = si_boundary.bsdf().eval(
             bsdf_ctx, si_boundary, wo_local, active_i)
-        active_i &= dr.neq(dr.max(bsdf_val), 0)
+        active_i &= (dr.max(bsdf_val) != 0)
 
         importance = bsdf_val * sensor_weight
         return importance, sensor_ds.uv, mi.UInt32(2), si_boundary.p, active_i
 
 mi.register_integrator("direct_projective", lambda props: DirectProjectiveIntegrator(props))
+
+del PSIntegrator

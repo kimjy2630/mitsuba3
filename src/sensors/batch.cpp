@@ -60,7 +60,7 @@ timings specified for the `batch` sensor itself.
         'sensor1': {
             'type': 'perspective',
             'fov': 45,
-            'to_world': mi.ScalarTransform4f.look_at(
+            'to_world': mi.ScalarTransform4f().look_at(
                 origin=[0, 0, 1],
                 target=[0, 0, 0],
                 up=[0, 1, 0]
@@ -69,7 +69,7 @@ timings specified for the `batch` sensor itself.
         'sensor2': {
             'type': 'perspective',
             'fov': 45,
-            'to_world': mi.ScalarTransform4f.look_at(
+            'to_world': mi.ScalarTransform4f().look_at(
                 origin=[1, 0, 0],
                 target=[0, 0, 0],
                 up=[0, 1, 0]
@@ -199,7 +199,7 @@ public:
 
         if (dr::grad_enabled(it)) {
             for (size_t i = 0; i < m_sensors.size(); ++i) {
-                Mask active_i = active && dr::eq(m_last_index, i);
+                Mask active_i = active && (m_last_index == i);
                 auto [rv_1, rv_2] =
                     m_sensors[i]->sample_direction(it, sample, active_i);
                 rv_1.uv.x() += i * m_sensors[i]->film()->size().x();
@@ -216,13 +216,13 @@ public:
                     m_sensors[i]->sample_direction(it, sample_, active);
                 rv_1.uv.x() += i * m_sensors[i]->film()->size().x();
 
-                Mask active_i = active && dr::neq(rv_1.pdf, 0.f);
+                Mask active_i = active && (rv_1.pdf != 0.f);
                 valid_count += dr::select(active_i, 1u, 0u);
 
                 // Should we put this sample into the reservoir?
                 Float  idx_f = sample_.x() * valid_count;
                 UInt32 idx_u = UInt32(idx_f);
-                Mask   accept = active_i && dr::eq(idx_u, valid_count - 1u);
+                Mask   accept = active_i && (idx_u == valid_count - 1u);
 
                 // Reuse sample_.x
                 sample_.x() = dr::select(active_i, idx_f - idx_u, sample_.x());
@@ -246,7 +246,7 @@ public:
                         Mask active) const override {
         Float result = dr::zeros<Float>();
         for (size_t i = 0; i < m_sensors.size(); ++i) {
-            Mask active_i = active && dr::eq(m_last_index, i);
+            Mask active_i = active && (m_last_index == i);
             dr::masked(result, active_i) = m_sensors[i]->pdf_direction(it, ds, active_i);
         }
         return result;
@@ -255,7 +255,7 @@ public:
     Spectrum eval(const SurfaceInteraction3f &si, Mask active) const override {
         Spectrum result = dr::zeros<Spectrum>();
         for (size_t i = 0; i < m_sensors.size(); ++i) {
-            Mask active_i = active && dr::eq(m_last_index, i);
+            Mask active_i = active && (m_last_index == i);
             result[active_i] = m_sensors[i]->eval(si, active_i);
         }
         return result;
@@ -266,6 +266,17 @@ public:
         for (size_t i = 0; i < m_sensors.size(); ++i)
             result.expand(m_sensors[i]->bbox());
         return result;
+    }
+
+    void traverse(TraversalCallback *callback) override {
+        Base::traverse(callback);
+        std::string id;
+        for(size_t i = 0; i < m_sensors.size(); i++) {
+            id = m_sensors.at(i)->id();
+            if (id.empty() || string::starts_with(id, "_unnamed_"))
+                id = "sensor" + std::to_string(i);
+            callback->put_object(id, m_sensors.at(i).get(), +ParamFlags::NonDifferentiable);
+        }
     }
 
     MI_DECLARE_CLASS()

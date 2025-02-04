@@ -50,19 +50,22 @@ public:
      */
     FileStream(const fs::path &p, EMode mode = ERead);
 
+    /// Destructor
+    ~FileStream();
+
     /** \brief Closes the stream and the underlying file.
      * No further read or write operations are permitted.
      *
      * This function is idempotent.
      * It is called automatically by the destructor.
      */
-    virtual void close() override;
+    void close() override;
 
     /// Whether the stream is closed (no read or write are then permitted).
-    virtual bool is_closed() const override;
+    bool is_closed() const override;
 
     /// Convenience function for reading a line of text from an ASCII file
-    virtual std::string read_line() override;
+    std::string read_line() override;
 
     /// Return the "native" std::fstream associated with this FileStream
     std::fstream *native() { return m_file.get(); }
@@ -79,16 +82,16 @@ public:
      * \brief Reads a specified amount of data from the stream.
      * Throws an exception when the stream ended prematurely.
      */
-    virtual void read(void *p, size_t size) override;
+    void read(void *p, size_t size) override;
 
     /**
      * \brief Writes a specified amount of data into the stream.
      * Throws an exception when not all data could be written.
      */
-    virtual void write(const void *p, size_t size) override;
+    void write(const void *p, size_t size) override;
 
     /// Seeks to a position inside the stream. May throw if the resulting state is invalid.
-    virtual void seek(size_t pos) override;
+    void seek(size_t pos) override;
 
     /** \brief Truncates the file to a given size.
      * Automatically flushes the stream before truncating the file.
@@ -96,37 +99,33 @@ public:
      *
      * Throws an exception if in read-only mode.
      */
-    virtual void truncate(size_t size) override;
+    void truncate(size_t size) override;
 
     /// Gets the current position inside the file
-    virtual size_t tell() const override;
+    size_t tell() const override;
 
     /** \brief Returns the size of the file.
      * \note After a write, the size may not be updated
      * until a \ref flush is performed.
      */
-    virtual size_t size() const override;
+    size_t size() const override;
 
     /// Flushes any buffered operation to the underlying file.
-    virtual void flush() override;
+    void flush() override;
 
     /// Whether the field was open in write-mode (and was not closed)
-    virtual bool can_write() const override { return m_mode != ERead && !is_closed(); }
+    bool can_write() const override { return m_mode != ERead && !is_closed(); }
 
     /// True except if the stream was closed.
-    virtual bool can_read() const override { return !is_closed(); }
+    bool can_read() const override { return !is_closed(); }
 
     /// Returns a string representation
-    virtual std::string to_string() const override;
+    std::string to_string() const override;
 
     //! @}
     // =========================================================================
 
     MI_DECLARE_CLASS()
-protected:
-
-    /// Protected destructor
-    virtual ~FileStream();
 
 private:
     EMode m_mode;

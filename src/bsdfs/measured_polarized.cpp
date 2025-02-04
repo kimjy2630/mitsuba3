@@ -100,8 +100,7 @@ approximate roughness of the material to be rendered. Note that any value here
 will result in a correct rendering but the level of noise can vary significantly.
 
 .. warning::
-    This BSDF is currently only supported in the ``scalar_spectral_polarized``
-    variant.
+    This BSDF is only supported in ``*_spectral_polarized`` variants.
 */
 template <typename Float, typename Spectrum>
 class MeasuredPolarized final : public BSDF<Float, Spectrum> {
@@ -259,7 +258,7 @@ public:
                 for (int i = 0; i < 4; ++i) {
                     for (int j = 0; j < 4; ++j) {
                         UnpolarizedSpectrum tmp(0.f);
-                        for (size_t k = 0; k < dr::array_size_v<UnpolarizedSpectrum>; ++k) {
+                        for (size_t k = 0; k < dr::size_v<UnpolarizedSpectrum>; ++k) {
                             Float params[4] = {
                                 phi_d, theta_d, theta_h,
                                 si.wavelengths[k]
@@ -299,7 +298,7 @@ public:
                                                    wi_hat, xi_hat, mueller::stokes_basis(wi_hat));
         } else {
             if (m_wavelength == -1.f) {
-                for (size_t k = 0; k < dr::array_size_v<UnpolarizedSpectrum>; ++k) {
+                for (size_t k = 0; k < dr::size_v<UnpolarizedSpectrum>; ++k) {
                     Float params[4] = {
                         phi_d, theta_d, theta_h,
                         si.wavelengths[k]
@@ -385,8 +384,8 @@ private:
               th = dr::safe_acos(dr::dot(n, h));
 
         Vector3 i_prj = dr::normalize(i - dr::dot(i, h)*h);
-        Value cos_phi_d = dr::clamp(dr::dot(t, i_prj), -1.f, 1.f),
-              sin_phi_d = dr::clamp(dr::dot(b, i_prj), -1.f, 1.f);
+        Value cos_phi_d = dr::clip(dr::dot(t, i_prj), -1.f, 1.f),
+              sin_phi_d = dr::clip(dr::dot(b, i_prj), -1.f, 1.f);
 
         Value pd = dr::atan2(sin_phi_d, cos_phi_d);
 

@@ -121,10 +121,7 @@ public:
             ScalarTransform4f::scale(ScalarVector3f(radius, radius, length));
 
         m_discontinuity_types = (uint32_t) DiscontinuityFlags::AllTypes;
-        dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
-
         m_shape_type = ShapeType::Cylinder;
-        dr::set_attr(this, "shape_type", m_shape_type);
 
         update();
         initialize();
@@ -180,7 +177,7 @@ public:
     ScalarBoundingBox3f bbox() const override {
         ScalarVector3f x1 = m_to_world.scalar() * ScalarVector3f(1.f, 0.f, 0.f),
                        x2 = m_to_world.scalar() * ScalarVector3f(0.f, 1.f, 0.f),
-                       x  = dr::sqrt(dr::sqr(x1) + dr::sqr(x2));
+                       x  = dr::sqrt(dr::square(x1) + dr::square(x2));
 
         ScalarPoint3f p0 = m_to_world.scalar() * ScalarPoint3f(0.f, 0.f, 0.f),
                       p1 = m_to_world.scalar() * ScalarPoint3f(0.f, 0.f, 1.f);
@@ -221,12 +218,12 @@ public:
 
         // Project the cylinder direction onto the plane
         FloatP8 dp   = dr::dot(cyl_d, face_n);
-        MaskP8 valid = dr::neq(dp, 0.f);
+        MaskP8 valid = (dp != 0.f);
 
         // Compute semimajor/minor axes of ellipse
         Vector3fP8 v1 = dr::fnmadd(face_n, dp, cyl_d);
         FloatP8 v1_n2 = dr::squared_norm(v1);
-        v1 = dr::select(dr::neq(v1_n2, 0.f), v1 * dr::rsqrt(v1_n2),
+        v1 = dr::select(v1_n2 != 0.f, v1 * dr::rsqrt(v1_n2),
                     coordinate_system(face_n).first);
         Vector3fP8 v2 = dr::cross(face_n, v1);
 
@@ -237,10 +234,10 @@ public:
         // Compute center of ellipse
         FloatP8 t = dr::dot(face_n, face_p - cyl_p) / dp;
         Point3fP8 center = dr::fmadd(Vector3fP8(cyl_d), t, Vector3fP8(cyl_p));
-        center[neq(face_n, 0.f)] = face_p;
+        center[face_n != 0.f] = face_p;
 
         // Compute ellipse minima and maxima
-        Vector3fP8 x = dr::sqrt(dr::sqr(v1) + dr::sqr(v2));
+        Vector3fP8 x = dr::sqrt(dr::square(v1) + dr::square(v2));
         BoundingBox3fP8 ellipse_bounds(center - x, center + x);
         MaskP8 ellipse_overlap = valid && bbox.overlaps(ellipse_bounds);
         ellipse_bounds.clip(bbox);
@@ -529,7 +526,7 @@ public:
         si.uv = Point2f(sample2 * 2.f, 0.f);
         dr::masked(si.uv, sample2 > 0.5f) = Point2f(sample2 * 2.f - 1.f, 1.f);
         uint32_t flags = (uint32_t) DiscontinuityFlags::PerimeterType;
-        Mask perimeter = active & dr::eq(sample1, +DiscontinuityFlags::PerimeterType);
+        Mask perimeter = active & (sample1 == +DiscontinuityFlags::PerimeterType);
         dr::masked(ss, perimeter) =
             primitive_silhouette_projection(viewpoint, si, flags, 0.f, perimeter);
         dr::masked(ss.pdf, perimeter) = dr::rcp(dr::FourPi<Float> * m_radius.value());
@@ -538,7 +535,7 @@ public:
         si.uv = Point2f(0.1f, sample2 * 2.f);
         dr::masked(si.uv, sample2 > 0.5f) = Point2f(0.6f, sample2 * 2.f - 1.f);
         flags = (uint32_t) DiscontinuityFlags::InteriorType;
-        Mask interior = active & dr::eq(sample1, +DiscontinuityFlags::InteriorType);
+        Mask interior = active & (sample1 == +DiscontinuityFlags::InteriorType);
         dr::masked(ss, interior) =
             primitive_silhouette_projection(viewpoint, si, flags, 0.f, interior);
         dr::masked(ss.pdf, interior) = dr::rcp(2 * m_length.value());
@@ -583,9 +580,9 @@ public:
               dy = Value(ray.d.y()),
               dz = Value(ray.d.z());
 
-        Value A = dr::sqr(dx) + dr::sqr(dy),
+        Value A = dr::square(dx) + dr::square(dy),
               B = ScalarValue(2.f) * (dx * ox + dy * oy),
-              C = dr::sqr(ox) + dr::sqr(oy) - dr::sqr(radius);
+              C = dr::square(ox) + dr::square(oy) - dr::square(radius);
 
         auto [solution_found, near_t, far_t] = math::solve_quadratic(A, B, C);
 
@@ -641,9 +638,9 @@ public:
               dy = Value(ray.d.y()),
               dz = Value(ray.d.z());
 
-        Value A = dr::sqr(dx) + dr::sqr(dy),
+        Value A = dr::square(dx) + dr::square(dy),
               B = ScalarValue(2.f) * (dx * ox + dy * oy),
-              C = dr::sqr(ox) + dr::sqr(oy) - dr::sqr(radius);
+              C = dr::square(ox) + dr::square(oy) - dr::square(radius);
 
         auto [solution_found, near_t, far_t] = math::solve_quadratic(A, B, C);
 

@@ -48,8 +48,8 @@ std::tuple<Float, Float, Float, Float> fresnel(Float cos_theta_i, Float eta) {
     Float cos_theta_i_abs = dr::abs(cos_theta_i);
     Float cos_theta_t_abs = dr::safe_sqrt(cos_theta_t_sqr);
 
-    auto index_matched = dr::eq(eta, 1.f),
-         special_case  = index_matched || dr::eq(cos_theta_i_abs, 0.f);
+    auto index_matched = eta == 1.f,
+         special_case  = index_matched || (cos_theta_i_abs == 0.f);
 
     Float r_sc = dr::select(index_matched, Float(0.f), Float(1.f));
 
@@ -60,7 +60,7 @@ std::tuple<Float, Float, Float, Float> fresnel(Float cos_theta_i, Float eta) {
     Float a_p = dr::fnmadd(eta_it, cos_theta_i_abs, cos_theta_t_abs) /
                 dr::fmadd(eta_it, cos_theta_i_abs, cos_theta_t_abs);
 
-    Float r = 0.5f * (dr::sqr(a_s) + dr::sqr(a_p));
+    Float r = 0.5f * (dr::square(a_s) + dr::square(a_p));
 
     dr::masked(r, special_case) = r_sc;
 
@@ -176,8 +176,8 @@ fresnel_polarized(Float cos_theta_i, Float eta) {
     dr::Complex<Float> a_p = (eta_it * cos_theta_i_abs - cos_theta_t) /
                              (eta_it * cos_theta_i_abs + cos_theta_t);
 
-    auto index_matched = dr::eq(eta, 1.f);
-    auto invalid       = dr::eq(eta, 0.f);
+    auto index_matched = eta == 1.f;
+    auto invalid       = eta == 0.f;
     dr::masked(a_s, index_matched || invalid) = 0.f;
     dr::masked(a_p, index_matched || invalid) = 0.f;
 
@@ -239,7 +239,7 @@ fresnel_polarized(Float cos_theta_i, dr::Complex<Float> eta) {
     /* Using Snell's law, calculate the squared sine of the
        angle between the surface normal and the transmitted ray */
     dr::Complex<Float> cos_theta_t_sqr =
-        1.f - dr::sqr(eta_ti) * dr::fnmadd(cos_theta_i, cos_theta_i, 1.f);
+        1.f - dr::square(eta_ti) * dr::fnmadd(cos_theta_i, cos_theta_i, 1.f);
 
     /* Find the cosines of the incident/transmitted rays */
     Float cos_theta_i_abs = dr::abs(cos_theta_i);
@@ -248,7 +248,7 @@ fresnel_polarized(Float cos_theta_i, dr::Complex<Float> eta) {
     /* Choose the appropriate sign of the root (important when computing the
        phase difference under total internal reflection, see appendix A.2 of
        "Stellar Polarimetry" by David Clarke) */
-    cos_theta_t = dr::mulsign(dr::Array<Float, 2>(cos_theta_t), dr::real(cos_theta_t_sqr));
+    dr::masked(cos_theta_t, dr::imag(cos_theta_t) > 0) = dr::conj(cos_theta_t);
 
     /* Amplitudes of reflected waves. The sign of 'a_p' used here is referred
        to as the "Verdet convention" which more common in the literature
@@ -258,8 +258,8 @@ fresnel_polarized(Float cos_theta_i, dr::Complex<Float> eta) {
     dr::Complex<Float> a_p = (eta_it * cos_theta_i_abs - cos_theta_t) /
                              (eta_it * cos_theta_i_abs + cos_theta_t);
 
-    auto index_matched = dr::eq(dr::squared_norm(eta), 1.f) && dr::eq(dr::imag(eta), 0.f);
-    auto invalid       = dr::eq(dr::squared_norm(eta), 0.f);
+    auto index_matched  = (dr::squared_norm(eta) == 1.f) && (dr::imag(eta) == 0.f);
+    auto invalid        = dr::squared_norm(eta) == 0.f;
     dr::masked(a_s, index_matched || invalid) = 0.f;
     dr::masked(a_p, index_matched || invalid) = 0.f;
 

@@ -461,6 +461,8 @@ MI_VARIANT void Scene<Float, Spectrum>::accel_parameters_changed_gpu() {
                 s.ias_data = {};
                 s.ias_handle = ias[0].traversableHandle;
             } else {
+                scoped_optix_context guard;
+
                 // Build a "master" IAS that contains all the IAS of the scene (meshes,
                 // custom shapes, instances, ...)
                 OptixAccelBuildOptions accel_options = {};
@@ -495,8 +497,6 @@ MI_VARIANT void Scene<Float, Spectrum>::accel_parameters_changed_gpu() {
                     = jit_malloc(AllocType::Device, buffer_sizes.tempSizeInBytes);
                 s.ias_data.buffer
                     = jit_malloc(AllocType::Device, buffer_sizes.outputSizeInBytes);
-
-                scoped_optix_context guard;
 
                 jit_optix_check(optixAccelBuild(
                     config.context,
@@ -560,12 +560,13 @@ MI_VARIANT void Scene<Float, Spectrum>::accel_release_gpu() {
             no ray tracing calls are pending. */
         (void) UInt32::steal(s->sbt_jit_index);
 
-        m_accel = nullptr;
-
         /* Decrease the reference count of the IAS handle variable. This will
            trigger the release of the OptiX acceleration data structure if no
-           ray tracing calls are pending. */
+           ray tracing calls are pending.
+           This **needs** to be done after decreasing the SBT index */
         m_accel_handle = 0;
+
+        m_accel = nullptr;
     }
 }
 
@@ -583,6 +584,8 @@ MI_VARIANT void Scene<Float, Spectrum>::static_accel_shutdown_gpu() {
 
                 for (size_t i = 0; i < 2 * OPTIX_SHAPE_TYPE_COUNT; i++)
                     free(config.custom_shapes_program_names[i]);
+
+                config.pipeline_jit_index = 0;
             }
         }
     }
@@ -711,7 +714,7 @@ Scene<Float, Spectrum>::ray_test_gpu(const Ray3f &ray, Mask active) const {
                             trace_args, active.index(),
                             config.pipeline_jit_index, s.sbt_jit_index);
 
-        return active && dr::eq(UInt32::steal(trace_args[15]), 1);
+        return active && (UInt32::steal(trace_args[15]) == 1);
     } else {
         DRJIT_MARK_USED(ray);
         DRJIT_MARK_USED(active);

@@ -212,7 +212,6 @@ public:
         m_components.push_back(BSDFFlags::GlossyTransmission | BSDFFlags::FrontSide |
                                BSDFFlags::BackSide | BSDFFlags::NonSymmetric | extra);
         m_flags = m_components[0] | m_components[1];
-        dr::set_attr(this, "flags", m_flags);
 
         parameters_changed();
     }
@@ -253,7 +252,7 @@ public:
         Float cos_theta_i = Frame3f::cos_theta(si.wi);
 
         // Ignore perfectly grazing configurations
-        active &= dr::neq(cos_theta_i, 0.f);
+        active &= cos_theta_i != 0.f;
 
         /* Construct the microfacet distribution matching the roughness values at the current surface position. */
         MicrofacetDistribution distr(m_type,
@@ -272,7 +271,7 @@ public:
         Normal3f m;
         std::tie(m, bs.pdf) =
             sample_distr.sample(dr::mulsign(si.wi, cos_theta_i), sample2);
-        active &= dr::neq(bs.pdf, 0.f);
+        active &= bs.pdf != 0.f;
 
         auto [F, cos_theta_t, eta_it, eta_ti] =
             fresnel(dr::dot(si.wi, m), m_eta);
@@ -331,7 +330,7 @@ public:
 
             /* For transmission, radiance must be scaled to account for the solid
                angle compression that occurs when crossing the interface. */
-            UnpolarizedSpectrum factor = (ctx.mode == TransportMode::Radiance) ? dr::sqr(eta_ti) : Float(1.f);
+            UnpolarizedSpectrum factor = (ctx.mode == TransportMode::Radiance) ? dr::square(eta_ti) : Float(1.f);
 
             if (m_specular_transmittance)
                 factor *= m_specular_transmittance->eval(si, selected_t);
@@ -340,8 +339,8 @@ public:
 
             // Jacobian of the half-direction mapping
             dr::masked(dwh_dwo, selected_t) =
-                (dr::sqr(bs.eta) * dr::dot(bs.wo, m)) /
-                 dr::sqr(dr::dot(si.wi, m) + bs.eta * dr::dot(bs.wo, m));
+                (dr::square(bs.eta) * dr::dot(bs.wo, m)) /
+                 dr::square(dr::dot(si.wi, m) + bs.eta * dr::dot(bs.wo, m));
         }
 
         if (likely(m_sample_visible))
@@ -363,7 +362,7 @@ public:
               cos_theta_o = Frame3f::cos_theta(wo);
 
         // Ignore perfectly grazing configurations
-        active &= dr::neq(cos_theta_i, 0.f);
+        active &= cos_theta_i != 0.f;
 
         // Determine the type of interaction
         bool has_reflection   = ctx.is_enabled(BSDFFlags::GlossyReflection, 0),
@@ -415,12 +414,12 @@ public:
             /* Missing term in the original paper: account for the solid angle
                compression when tracing radiance -- this is necessary for
                bidirectional methods. */
-            Float scale = (ctx.mode == TransportMode::Radiance) ? dr::sqr(inv_eta) : Float(1.f);
+            Float scale = (ctx.mode == TransportMode::Radiance) ? dr::square(inv_eta) : Float(1.f);
 
             // Compute the total amount of transmission
             UnpolarizedSpectrum value = dr::abs(
                 (scale * (1.f - F) * D * G * eta * eta * dr::dot(si.wi, m) * dr::dot(wo, m)) /
-                (cos_theta_i * dr::sqr(dr::dot(si.wi, m) + eta * dr::dot(wo, m))));
+                (cos_theta_i * dr::square(dr::dot(si.wi, m) + eta * dr::dot(wo, m))));
 
             if (m_specular_transmittance)
                 value *= m_specular_transmittance->eval(si, eval_t);
@@ -439,7 +438,7 @@ public:
               cos_theta_o = Frame3f::cos_theta(wo);
 
         // Ignore perfectly grazing configurations
-        active &= dr::neq(cos_theta_i, 0.f);
+        active &= cos_theta_i != 0.f;
 
         // Determine the type of interaction
         bool has_reflection   = ctx.is_enabled(BSDFFlags::GlossyReflection, 0),
@@ -468,7 +467,7 @@ public:
         // Jacobian of the half-direction mapping
         Float dwh_dwo = dr::select(reflect, dr::rcp(4.f * dr::dot(wo, m)),
                                (eta * eta * dr::dot(wo, m)) /
-                                   dr::sqr(dr::dot(si.wi, m) + eta * dr::dot(wo, m)));
+                                   dr::square(dr::dot(si.wi, m) + eta * dr::dot(wo, m)));
 
         /* Construct the microfacet distribution matching the
            roughness values at the current surface position. */
@@ -506,7 +505,7 @@ public:
               cos_theta_o = Frame3f::cos_theta(wo);
 
         // Ignore perfectly grazing configurations
-        active &= dr::neq(cos_theta_i, 0.f);
+        active &= cos_theta_i != 0.f;
 
         // Determine the type of interaction
         bool has_reflection   = ctx.is_enabled(BSDFFlags::GlossyReflection, 0),
@@ -571,12 +570,12 @@ public:
             /* Missing term in the original paper: account for the solid angle
                compression when tracing radiance -- this is necessary for
                bidirectional methods. */
-            Float scale = (ctx.mode == TransportMode::Radiance) ? dr::sqr(inv_eta) : Float(1.f);
+            Float scale = (ctx.mode == TransportMode::Radiance) ? dr::square(inv_eta) : Float(1.f);
 
             // Compute the total amount of transmission
             UnpolarizedSpectrum value = dr::abs(
                 (scale * (1.f - F) * D * G * eta * eta * dot_wi_m * dot_wo_m) /
-                (cos_theta_i * dr::sqr(dot_wi_m + eta * dot_wo_m)));
+                (cos_theta_i * dr::square(dot_wi_m + eta * dot_wo_m)));
 
             if (m_specular_transmittance)
                 value *= m_specular_transmittance->eval(si, eval_t);
@@ -599,7 +598,7 @@ public:
         // Jacobian of the half-direction mapping
         Float dwh_dwo = dr::select(reflect, dr::rcp(4.f * dot_wo_m),
                                    (eta * eta * dot_wo_m) /
-                                       dr::sqr(dot_wi_m + eta * dot_wo_m));
+                                       dr::square(dot_wi_m + eta * dot_wo_m));
 
         return { depolarizer<Spectrum>(result),
                  dr::select(active, pdf * dr::abs(dwh_dwo), 0.f) };

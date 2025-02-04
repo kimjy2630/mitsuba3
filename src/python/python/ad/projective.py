@@ -71,8 +71,8 @@ class ProjectiveDetail():
             distr_idx, silhouette_idx_pmf = shape_distr.sample_pmf(sample2.x, active)
             silhouette_idx = dr.gather(mi.UInt32, shape_indices, distr_idx, active)
 
-            valid = (dr.neq(silhouette_idx_pmf, 0) &
-                     dr.neq(shape_pmf, 0) &
+            valid = ((silhouette_idx_pmf != 0) &
+                     (shape_pmf != 0) &
                      active)
 
             ss = silhouette_shapes[i].sample_precomputed_silhouette(
@@ -126,7 +126,7 @@ class ProjectiveDetail():
 
         sample_to_camera = camera_to_sample.inverse()
         p_min = sample_to_camera @ mi.Point3f(0, 0, 0)
-        multiplier = dr.sqr(near_clip) / dr.abs(p_min[0] * p_min[1] * 4.0)
+        multiplier = dr.square(near_clip) / dr.abs(p_min[0] * p_min[1] * 4.0)
 
         # Frame
         frame_t = dr.normalize(sensor_center - ss.p)
@@ -136,7 +136,7 @@ class ProjectiveDetail():
         J_num = dr.norm(dr.cross(frame_n, sensor_lookat_dir)) * \
                 dr.norm(dr.cross(frame_s, sensor_lookat_dir)) * \
                 dr.abs(dr.dot(frame_s, ss.silhouette_d))
-        J_den = dr.sqr(dr.sqr(dr.dot(frame_t, sensor_lookat_dir))) * \
+        J_den = dr.square(dr.square(dr.dot(frame_t, sensor_lookat_dir))) * \
                 dr.squared_norm(ss.p - sensor_center)
 
         return J_num / J_den * multiplier
@@ -145,21 +145,33 @@ class ProjectiveDetail():
                                                     scene,
                                                     sampler,
                                                     ss,
-                                                    viewpoint,
+                                                    sensor,
                                                     active=True) -> mi.Float:
         """
         Compute the difference in radiance between two rays that hit and miss a
         silhouette point ``ss.p`` viewed from ``viewpoint``.
         """
+        if not sensor.__repr__().startswith('PerspectiveCamera'):
+            raise Exception("Only perspective cameras are supported")
+
         with dr.suspend_grad():
+            to_world = sensor.world_transform()
+            sensor_center = to_world @ mi.Point3f(0)
+
             # Is the boundary point visible or is occluded ?
             ss_invert = mi.SilhouetteSample3f(ss)
             ss_invert.d = -ss_invert.d
             ray_test = ss_invert.spawn_ray()
 
-            dist = dr.norm(viewpoint - ray_test.o)
+            dist = dr.norm(sensor_center - ray_test.o)
             ray_test.maxt = dist * (1 - mi.math.ShadowEpsilon)
             visible = ~scene.ray_test(ray_test, active) & active
+
+            # Is the boundary point within the view frustum ?
+            it = dr.zeros(mi.Interaction3f)
+            it.p = ss.p
+            ds, _ = sensor.sample_direction(it, mi.Point2f(0), active)
+            visible &= ds.pdf != 0
 
             # Estimate the radiance difference along that path
             radiance_diff, _ = self.parent.sample_radiance_difference(
@@ -211,7 +223,7 @@ class ProjectiveDetail():
         scene_index = mi.UInt32(0)
         silhouette_shapes = scene.silhouette_shapes()
         for i in range(len(silhouette_shapes)):
-            current_shape = dr.eq(si.shape, mi.ShapePtr(silhouette_shapes[i]))
+            current_shape = (si.shape == mi.ShapePtr(silhouette_shapes[i]))
             scene_index[current_shape] = mi.UInt32(i)
             is_silhouette_shape |= (active & current_shape)
         active &= is_silhouette_shape
@@ -228,7 +240,7 @@ class ProjectiveDetail():
     def init_indirect_silhouette(self,
                                  scene: mi.Scene,
                                  sensor: mi.Sensor,
-                                 seed: int):
+                                 seed: mi.UInt32):
         """
         Initialize the guiding structure for indirect discontinuous derivatives
         based on the guiding mode. The result is stored in this python class.
@@ -257,13 +269,8 @@ class ProjectiveDetail():
         elif parent.guiding == 'octree':
             self.init_indirect_silhouette_octree(scene, sensor, seed)
 
-        # After cleaning up, only necessary guiding distribution storage should
-        # exist in the device memory. This usually occupies dozens of MBs for
-        # octree, and ~0.75GB for grid based guiding with default settings.
-        gc.collect()
-        gc.collect()
-        # TODO this should happen automatically
 
+    @dr.syntax
     def init_indirect_silhouette_grid_unif(self, scene, sensor, seed):
         """
         Guiding structure initialization for uniform grid sampling.
@@ -290,13 +297,12 @@ class ProjectiveDetail():
 
         res = dr.zeros(mi.Float, sampler.wavefront_size())
         cnt = mi.UInt32(0)
-        loop = mi.Loop("guiding_init_indirect_unif", lambda: (cnt, sampler, res))
-        while loop(cnt < parent.guiding_rounds):
+        while cnt < parent.guiding_rounds:
             # GridGuiding - Sample uniform points in [0, 1]^3
             sample_3 = self.guiding_distr.random_cell_sample(sampler)
             # GridGuiding - Evaluate point contribution
             value, _ = self.eval_indirect_integrand(
-                scene, sensor, sample_3, sampler, preprocess=True, active=mi.Mask(True))
+                scene, sensor, sample_3, sampler, preprocess=True)
             value = dr.max(value)  # dr.max over channels
             res += value
             cnt += 1
@@ -355,7 +361,7 @@ class ProjectiveDetail():
             count = dr.zeros(mi.Float, ttl_num_cells)
             ones = dr.ones(mi.Float, dr.width(idx))
             dr.scatter_reduce(dr.ReduceOp.Add, count, ones, idx, active_seed)
-            count[dr.eq(count, 0)] = 1
+            count[count == 0] = 1
 
             # Compute the average contribution of every cell
             res_tmp = res_sum / count
@@ -597,6 +603,7 @@ class ProjectiveDetail():
 
         # ---------------------- Triangle mesh projection ----------------------
 
+        @dr.syntax
         def mesh_walk(self,
                       si_: mi.SurfaceInteraction3f,
                       viewpoint: mi.Point3f,
@@ -614,9 +621,7 @@ class ProjectiveDetail():
             depth = mi.UInt32(0)
             last_succ_ss = mi.SilhouetteSample3f(ss)
 
-            loop = mi.Loop("heuristic_mesh_walk",
-                lambda: (active_loop, depth, last_succ_ss, si, ss, sampler))
-            while loop(active_loop):
+            while active_loop:
                 flags = (mi.DiscontinuityFlags.HeuristicWalk.value |
                          mi.DiscontinuityFlags.PerimeterType.value)
                 ss[active_loop] = si.shape.primitive_silhouette_projection(
@@ -634,6 +639,7 @@ class ProjectiveDetail():
 
             return ss, sampler.state, valid
 
+        @dr.syntax
         def mesh_jump(self,
                       scene: mi.Scene,
                       si_: mi.SurfaceInteraction3f,
@@ -660,8 +666,7 @@ class ProjectiveDetail():
             valid = active & ss.is_valid()
             loop_active = active & (~valid) & (max_jump > 0)
 
-            loop = mi.Loop("mesh_jump", lambda: (loop_active, valid, depth, si, ss))
-            while loop(loop_active):
+            while loop_active:
                 # Project si onto the solution set
                 H = dr.normalize(viewpoint - si.p)
                 a = dr.dot(H, si.dn_du)
@@ -679,7 +684,7 @@ class ProjectiveDetail():
                 )
                 si = scene.ray_intersect(ray_new, mi.RayFlags.All | mi.RayFlags.dNSdUV,
                                          coherent=False, active=loop_active)
-                loop_active &= si.is_valid() & dr.eq(si.shape, shape)
+                loop_active &= si.is_valid() & (si.shape == shape)
 
                 # Check if we hit a silhouette
                 flags = mi.DiscontinuityFlags.PerimeterType.value

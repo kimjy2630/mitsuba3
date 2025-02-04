@@ -1,6 +1,6 @@
 #pragma once
 
-#include <drjit/array_router.h>
+#include <drjit/array.h>
 #include <mitsuba/core/object.h>
 
 NAMESPACE_BEGIN(mitsuba)
@@ -406,6 +406,9 @@ public:
 
     /// Return a string representation
     std::string to_string() const override;
+
+    /// Free static resources
+    static void static_shutdown();
 
     MI_DECLARE_CLASS()
 protected:

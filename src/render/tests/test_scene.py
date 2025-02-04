@@ -113,7 +113,7 @@ def test04_scene_destruction_and_pending_raytracing(variants_vec_rgb, shadow):
             'integrator': { 'type': 'path' },
             'mysensor': {
                 'type': 'perspective',
-                'to_world': T.look_at(origin=[0, 0, 3], target=[0, 0, 0], up=[0, 1, 0]),
+                'to_world': T().look_at(origin=[0, 0, 3], target=[0, 0, 0], up=[0, 1, 0]),
                 'myfilm': {
                     'type': 'hdrfilm',
                     'rfilter': { 'type': 'box'},
@@ -257,7 +257,7 @@ def test10_test_scene_bbox_update(variant_scalar_rgb):
     bbox = scene.bbox()
     params = mi.traverse(scene)
     offset = [-1, -1, -1]
-    params['sphere.to_world'] = mi.Transform4f.translate(offset)
+    params['sphere.to_world'] = mi.Transform4f().translate(offset)
     params.update()
 
     expected = mi.BoundingBox3f(bbox.min + offset, bbox.max + offset)
@@ -313,5 +313,34 @@ def test11_sample_silhouette_bijective(variants_vec_rgb):
     # Both types
     ss = scene.sample_silhouette(samples, mi.DiscontinuityFlags.AllTypes)
     out = scene.invert_silhouette_sample(ss)
-    assert dr.all(dr.neq(ss.discontinuity_type, mi.DiscontinuityFlags.Empty.value))
+    assert dr.all(ss.discontinuity_type != mi.DiscontinuityFlags.Empty.value)
     assert dr.allclose(valid_samples, valid_out, atol=1e-6)
+
+
+def test_enable_embree_robust_flag(variants_any_llvm):
+
+    # We intersect rays against two adjacent triangles. The rays hit exactly
+    # the edge between two triangles, which Embree will not count as an
+    # intersection if the "robust" flag is not set.
+    R = mi.Transform4f().rotate(dr.normalize(mi.Vector3f(1, 1, 1)), 90)
+    vertices = mi.Vector3f(
+        [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0])
+    vertices = R @ vertices
+
+    mesh = mi.Mesh("MyMesh", 4, 2)
+    params = mi.traverse(mesh)
+    params['vertex_positions'] = dr.ravel(vertices)
+    params['faces'] = [0, 1, 2, 1, 3, 2]
+    params.update()
+
+    u, v = dr.meshgrid(dr.linspace(mi.Float, 0.05, 0.95, 32),
+                       dr.linspace(mi.Float, 0.05, 0.95, 32))
+    d = mi.warp.square_to_cosine_hemisphere(mi.Vector2f(u, v))
+    ray = R @ mi.Ray3f(mi.Point3f(0.5, 0.5, 0.0) + d, -d)
+
+    scene = mi.load_dict({'type': 'scene', 'mesh': mesh})
+    assert dr.any(~scene.ray_intersect(ray).is_valid())
+
+    scene = mi.load_dict({'type': 'scene', 'mesh': mesh,
+                          'embree_use_robust_intersections': True})
+    assert dr.all(scene.ray_intersect(ray).is_valid())

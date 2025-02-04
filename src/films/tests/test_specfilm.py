@@ -127,10 +127,10 @@ def test05_empty_film(variants_all_spectral, develop):
         assert dr.all((image == 0) | dr.isnan(image))
     else:
         image = mi.TensorXf(film.bitmap())
-        assert dr.all((image == 0) | dr.isnan(image))
+        assert dr.all((image == 0) | dr.isnan(image), axis=None)
 
 
-def test05_multiple_channels(variants_all_spectral):
+def test06_multiple_channels(variants_all_spectral):
     dic = {
         'type': 'specfilm',
         'width': 3,
@@ -144,11 +144,11 @@ def test05_multiple_channels(variants_all_spectral):
         }
         film = mi.load_dict(dic)
         chnl = film.prepare([])
-        block = film.create_block(False)
+        block = film.create_block()
         assert(block.channel_count() == chnl)
         assert(block.channel_count() == i+1)
 
-def test06_aovs(variants_all_spectral):
+def test07_aovs(variants_all_spectral):
     dic = {
         'type': 'specfilm',
         'width': 3,
@@ -163,7 +163,7 @@ def test06_aovs(variants_all_spectral):
         for j in range(1,5):
             film = mi.load_dict(dic)
             chnl = film.prepare(['AOV{}'.format(x) for x in range(1, j+1)])
-            block = film.create_block(False)
+            block = film.create_block()
             assert(block.channel_count() == chnl)
             assert(block.channel_count() == (i+1+j))
 
@@ -178,3 +178,29 @@ def test06_aovs(variants_all_spectral):
             }
         })
         film.prepare(['AOV', 'AOV'])
+
+def test07_srf(variants_all_spectral):
+    dic = {
+        'type': 'specfilm',
+        'channel1': {
+            'type': 'regular',
+            'wavelength_min': 400,
+            'wavelength_max': 500,
+            'values': "0.1, 0.2",
+        },
+        'channel2': {
+            'type': 'regular',
+            'wavelength_min': 700,
+            'wavelength_max': 800,
+            'values': "0.3, 0.4",
+        },
+    }
+
+    film = mi.load_dict(dic)
+    srf = film.sensor_response_function()
+    params = mi.traverse(srf)
+    key_range = "range"
+    key_values = "values"
+
+    dr.allclose(params[key_range], [400, 800])
+    dr.allclose(params[key_values], [0.1, 0.2, 0., 0.3, 0.4])

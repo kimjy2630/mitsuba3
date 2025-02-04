@@ -24,10 +24,12 @@ NAMESPACE_BEGIN(mitsuba)
  * instances, hence the need for an alternative in Mitsuba.
  *
  * In contrast, the ``Object`` class allows for a highly efficient
- * implementation that only adds 32 bits to the base object (for the counter)
- * and has no overhead for references.
+ * implementation that only adds 64 bits to the base object (for the counter)
+ * and has no overhead for references. In addition, when using Mitsuba in
+ * Python, this counter is shared with Python such that the ownerhsip and
+ * lifetime of any ``Object`` instance across C++ and Python is managed by it.
  */
-class MI_EXPORT_LIB Object {
+class MI_EXPORT_LIB Object : public nanobind::intrusive_base {
 public:
     /// Default constructor
     Object() { }
@@ -35,19 +37,8 @@ public:
     /// Copy constructor
     Object(const Object &) { }
 
-    /// Return the current reference count
-    int ref_count() const { return m_ref_count; };
-
-    /// Increase the object's reference count by one
-    void inc_ref() const { ++m_ref_count; }
-
-    /** \brief Decrease the reference count of the object and possibly
-     * deallocate it.
-     *
-     * The object will automatically be deallocated once the reference count
-     * reaches zero.
-     */
-    void dec_ref(bool dealloc = true) const noexcept;
+    /// Destructor
+    ~Object() { };
 
     /**
      * \brief Expand the object into a list of sub-objects and return them
@@ -118,148 +109,8 @@ public:
      */
     virtual std::string to_string() const;
 
-protected:
-    /** \brief Virtual protected deconstructor.
-     * (Will only be called by \ref ref)
-     */
-    virtual ~Object();
-
 private:
-    mutable std::atomic<int> m_ref_count { 0 };
-
     static Class *m_class;
-};
-
-/**
- * \brief Reference counting helper
- *
- * The \a ref template is a simple wrapper to store a pointer to an object. It
- * takes care of increasing and decreasing the object's reference count as
- * needed. When the last reference goes out of scope, the associated object
- * will be deallocated.
- *
- * The advantage over C++ solutions such as <tt>std::shared_ptr</tt> is that
- * the reference count is very compactly integrated into the base object
- * itself.
- */
-template <typename T> class ref {
-public:
-    /// Create a <tt>nullptr</tt>-valued reference
-    ref() { }
-
-    /// Construct a reference from a pointer
-    template <typename T2 = T>
-    ref(T *ptr) : m_ptr(ptr) {
-        static_assert(std::is_base_of_v<Object, T2>,
-                      "Cannot create reference to object not inheriting from Object class.");
-        if (m_ptr)
-            ((Object *) m_ptr)->inc_ref();
-    }
-
-    /// Construct a reference from another convertible reference
-    template <typename T2>
-    ref(const ref<T2> &r) : m_ptr((T2 *) r.get()) {
-        static_assert(std::is_convertible_v<T2*, T*>, "Cannot create reference to object from another unconvertible reference.");
-        if (m_ptr)
-            ((Object *) m_ptr)->inc_ref();
-    }
-
-    /// Copy constructor
-    ref(const ref &r) : m_ptr(r.m_ptr) {
-        if (m_ptr)
-            ((Object *) m_ptr)->inc_ref();
-    }
-
-    /// Move constructor
-    ref(ref &&r) noexcept : m_ptr(r.m_ptr) {
-        r.m_ptr = nullptr;
-    }
-
-    /// Destroy this reference
-    ~ref() {
-        if (m_ptr)
-            ((Object *) m_ptr)->dec_ref();
-    }
-
-    /// Move another reference into the current one
-    ref& operator=(ref&& r) noexcept {
-        if (&r != this) {
-            if (m_ptr)
-                ((Object *) m_ptr)->dec_ref();
-            m_ptr = r.m_ptr;
-            r.m_ptr = nullptr;
-        }
-        return *this;
-    }
-
-    /// Overwrite this reference with another reference
-    ref& operator=(const ref& r) noexcept {
-        if (m_ptr != r.m_ptr) {
-            if (r.m_ptr)
-                ((Object *) r.m_ptr)->inc_ref();
-            if (m_ptr)
-                ((Object *) m_ptr)->dec_ref();
-            m_ptr = r.m_ptr;
-        }
-        return *this;
-    }
-
-    /// Overwrite this reference with a pointer to another object
-    template <typename T2 = T>
-    ref& operator=(T *ptr) noexcept {
-        static_assert(std::is_base_of_v<Object, T2>,
-                      "Cannot create reference to an instance that does not"
-                      " inherit from the Object class..");
-        if (m_ptr != ptr) {
-            if (ptr)
-                ((Object *) ptr)->inc_ref();
-            if (m_ptr)
-                ((Object *) m_ptr)->dec_ref();
-            m_ptr = ptr;
-        }
-        return *this;
-    }
-
-    /// Compare this reference to another reference
-    bool operator==(const ref &r) const { return m_ptr == r.m_ptr; }
-
-    /// Compare this reference to another reference
-    bool operator!=(const ref &r) const { return m_ptr != r.m_ptr; }
-
-    /// Compare this reference to a pointer
-    bool operator==(const T* ptr) const { return m_ptr == ptr; }
-
-    /// Compare this reference to a pointer
-    bool operator!=(const T* ptr) const { return m_ptr != ptr; }
-
-    /// Access the object referenced by this reference
-    T* operator->() { return m_ptr; }
-
-    /// Access the object referenced by this reference
-    const T* operator->() const { return m_ptr; }
-
-    /// Return a C++ reference to the referenced object
-    T& operator*() { return *m_ptr; }
-
-    /// Return a const C++ reference to the referenced object
-    const T& operator*() const { return *m_ptr; }
-
-    /// Return a pointer to the referenced object
-    operator T* () { return m_ptr; }
-
-    /// Return a pointer to the referenced object
-    operator const T* () const { return m_ptr; }
-
-    /// Return a const pointer to the referenced object
-    T* get() { return m_ptr; }
-
-    /// Return a pointer to the referenced object
-    const T* get() const { return m_ptr; }
-
-    /// Check if the object is defined
-    operator bool() const { return m_ptr != nullptr; }
-private:
-    T *m_ptr = nullptr;
 };
 
 // -----------------------------------------------------------------------------
@@ -337,6 +188,9 @@ NAMESPACE_END(mitsuba)
 namespace drjit {
     template <typename Array>
     struct call_support<mitsuba::Object, Array> {
+        // This is for pointers to general `Object` instances, we don't have access
+        // to specific `Float` and `Spectrum` types here.
+        static constexpr const char *Variant = "";
         static constexpr const char *Domain = "mitsuba::Object";
     };
 }

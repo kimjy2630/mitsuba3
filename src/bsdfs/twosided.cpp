@@ -97,7 +97,6 @@ public:
             m_components.push_back(c | BSDFFlags::BackSide);
             m_flags = m_flags | m_components.back();
         }
-        dr::set_attr(this, "flags", m_flags);
 
         if (has_flag(m_flags, BSDFFlags::Transmission))
             Throw("Only materials without a transmission component can be nested!");
@@ -276,6 +275,89 @@ public:
                 si.wi.z() *= -1.f;
                 dr::masked(result, back_side) =
                     m_brdf[1]->eval_diffuse_reflectance(si, back_side);
+            }
+
+            return result;
+        }
+    }
+
+    Mask has_attribute(const std::string &name, Mask active) const override {
+        if (m_brdf[0] == m_brdf[1])
+            return m_brdf[0]->has_attribute(name, active);
+        else
+            return m_brdf[0]->has_attribute(name, active) ||
+                   m_brdf[1]->has_attribute(name, active);
+    }
+
+    UnpolarizedSpectrum eval_attribute(const std::string &name,
+                                       const SurfaceInteraction3f &si_,
+                                       Mask active) const override {
+        SurfaceInteraction3f si(si_);
+        if (m_brdf[0] == m_brdf[1]) {
+            si.wi.z() = dr::abs(si.wi.z());
+            return m_brdf[0]->eval_attribute(name, si, active);
+        } else {
+            UnpolarizedSpectrum result = 0.f;
+            Mask front_side = Frame3f::cos_theta(si.wi) > 0.f && active,
+                 back_side  = Frame3f::cos_theta(si.wi) < 0.f && active;
+
+            if (dr::any_or<true>(front_side))
+                result = m_brdf[0]->eval_attribute(name, si, front_side);
+
+            if (dr::any_or<true>(back_side)) {
+                si.wi.z() *= -1.f;
+                dr::masked(result, back_side) =
+                    m_brdf[1]->eval_attribute(name, si, back_side);
+            }
+
+            return result;
+        }
+    }
+
+    Float eval_attribute_1(const std::string &name,
+                           const SurfaceInteraction3f &si_,
+                           Mask active) const override {
+        SurfaceInteraction3f si(si_);
+        if (m_brdf[0] == m_brdf[1]) {
+            si.wi.z() = dr::abs(si.wi.z());
+            return m_brdf[0]->eval_attribute_1(name, si, active);
+        } else {
+            Float result = 0.f;
+            Mask front_side = Frame3f::cos_theta(si.wi) > 0.f && active,
+                 back_side  = Frame3f::cos_theta(si.wi) < 0.f && active;
+
+            if (dr::any_or<true>(front_side))
+                result = m_brdf[0]->eval_attribute_1(name, si, front_side);
+
+            if (dr::any_or<true>(back_side)) {
+                si.wi.z() *= -1.f;
+                dr::masked(result, back_side) =
+                    m_brdf[1]->eval_attribute_1(name, si, back_side);
+            }
+
+            return result;
+        }
+    }
+
+    Color3f eval_attribute_3(const std::string &name,
+                            const SurfaceInteraction3f &si_,
+                            Mask active) const override {
+        SurfaceInteraction3f si(si_);
+        if (m_brdf[0] == m_brdf[1]) {
+            si.wi.z() = dr::abs(si.wi.z());
+            return m_brdf[0]->eval_attribute_3(name, si, active);
+        } else {
+            Color3f result = 0.f;
+            Mask front_side = Frame3f::cos_theta(si.wi) > 0.f && active,
+                 back_side  = Frame3f::cos_theta(si.wi) < 0.f && active;
+
+            if (dr::any_or<true>(front_side))
+                result = m_brdf[0]->eval_attribute_3(name, si, front_side);
+
+            if (dr::any_or<true>(back_side)) {
+                si.wi.z() *= -1.f;
+                dr::masked(result, back_side) =
+                    m_brdf[1]->eval_attribute_3(name, si, back_side);
             }
 
             return result;

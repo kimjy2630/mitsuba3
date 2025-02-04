@@ -41,10 +41,18 @@ def test01_evaluation(variant_scalar_spectral_polarized):
                       dr.cos(theta_o)])
 
     value = bsdf.eval(ctx, si, wi)
-    value = np.array(value)[0,:,:]  # Extract Mueller matrix for one wavelength
+
+    # Manually extract matrix for first wavelength
+    # TODO: An issue with ArrayBase empty base class optimization
+    # This means that the data isn't tightly packed
+    mtx = mi.ScalarMatrix4f()
+    for i in range(0,4):
+        for j in range(0,4):
+            mtx[i, j] = value[i,j][0]
 
     ref = [[ 0.17119151, -0.00223141,  0.00754681,  0.00010021],
            [-0.00393003,  0.00427623, -0.00117126, -0.00310079],
            [-0.00424358,  0.00312945, -0.01219576,  0.00086167],
            [ 0.00099006, -0.00345963, -0.00285343, -0.00205485]]
-    assert dr.allclose(ref, value, rtol=1e-4)
+
+    assert dr.allclose(ref, mtx)

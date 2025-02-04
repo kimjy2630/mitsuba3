@@ -9,6 +9,7 @@
 #include <sstream>
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
 
 // Required for native thread functions
 #if defined(__linux__)
@@ -23,7 +24,9 @@
 NAMESPACE_BEGIN(mitsuba)
 
 static size_t global_thread_count = 0;
-static thread_local Thread *self = nullptr;
+
+static ref<Thread> main_thread = nullptr;
+static thread_local ref<Thread> self = nullptr;
 static std::atomic<uint32_t> thread_ctr { 0 };
 #if defined(__linux__) || defined(__APPLE__)
 static pthread_key_t this_thread_id;
@@ -32,6 +35,9 @@ static __declspec(thread) int this_thread_id;
 #endif
 static std::mutex task_mutex;
 static std::vector<Task *> registered_tasks;
+
+static std::mutex thread_registry_mutex;
+static std::unordered_map<std::string, Thread*> thread_registry;
 
 #if defined(_MSC_VER)
 namespace {
@@ -76,13 +82,19 @@ protected:
 /// Dummy class to associate a thread identity with a worker thread
 class WorkerThread : public Thread {
 public:
-    WorkerThread(const std::string &prefix) : Thread(tfm::format("%s%i", prefix, m_counter++)) { }
+    WorkerThread(const std::string &prefix) : Thread(tfm::format("%s%i", prefix, m_counter++)) {
+        std::lock_guard guard(thread_registry_mutex);
+        thread_registry[this->name()] = this;
+    }
 
     virtual void run() override { Throw("The worker thread is already running!"); }
 
     MI_DECLARE_CLASS()
 protected:
-    virtual ~WorkerThread() { }
+    virtual ~WorkerThread() {
+        std::lock_guard guard(thread_registry_mutex);
+        thread_registry.erase(this->name());
+    }
     static std::atomic<uint32_t> m_counter;
 };
 
@@ -172,6 +184,16 @@ Thread* Thread::thread() {
     Thread *self_val = self;
     assert(self_val);
     return self_val;
+}
+
+Thread* Thread::get_main_thread() {
+    Thread *main_val = main_thread;
+    assert(main_val);
+    return main_val;
+}
+
+bool Thread::has_initialized_thread() {
+    return self != nullptr;
 }
 
 bool Thread::is_running() const {
@@ -385,7 +407,6 @@ void Thread::start() {
 
     d->running = true;
 
-    inc_ref();
     d->thread = std::thread(&Thread::dispatch, this);
 }
 
@@ -433,9 +454,8 @@ void Thread::dispatch() {
 void Thread::exit() {
     Log(Debug, "Thread \"%s\" has finished", d->name);
     d->running = false;
-    Assert(self == this);
+    Assert(self.get() == this);
     self = nullptr;
-    dec_ref();
 }
 
 void Thread::join() {
@@ -477,6 +497,11 @@ bool Thread::register_external_thread(const std::string &prefix) {
     #endif
     self->d->running = true;
     self->d->external_thread = true;
+
+    // An external thread will re-use the main thread's Logger (thread safe)
+    // and create a new FileResolver (since the FileResolver is not thread safe).
+    self->d->logger = main_thread->d->logger;
+    self->d->fresolver = new FileResolver();
 
     const std::string &thread_name = self->name();
     #if defined(__linux__)
@@ -522,7 +547,7 @@ void Thread::static_initialization() {
     self = new MainThread();
     self->d->running = true;
     self->d->fresolver = new FileResolver();
-    self->inc_ref();
+    main_thread = self;
 }
 
 void Thread::static_shutdown() {
@@ -530,9 +555,24 @@ void Thread::static_shutdown() {
         task_wait_and_release(task);
     registered_tasks.clear();
 
-    thread()->d->running = false;
-    delete self;
+    /* Remove references to Loggers and FileResolvers from worker threads.
+     * _Important_: This might locally acquire the Python GIL due to reference
+     * counting. To prevent deadlocks, it's important that Thread::static_shutdown
+     * is run with the GIL acquired already. This ensures consistent lock
+     * acquisition order and prevents deadlocks. */
+    {
+        std::lock_guard guard(thread_registry_mutex);
+        for (auto &thread : thread_registry) {
+            thread.second->d->logger    = nullptr;
+            thread.second->d->fresolver = nullptr;
+        }
+        thread_registry.clear();
+    }
+    main_thread->d->logger    = nullptr;
+    main_thread->d->fresolver = nullptr;
+    main_thread->d->running   = false;
     self = nullptr;
+    main_thread = nullptr;
     #if defined(__linux__) || defined(__APPLE__)
         pthread_key_delete(this_thread_id);
     #endif

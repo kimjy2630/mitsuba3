@@ -265,7 +265,6 @@ public:
 
         for (auto c : m_components)
             m_flags |= c;
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -339,7 +338,7 @@ public:
         BSDFSample3f bs   = dr::zeros<BSDFSample3f>();
 
         // Ignoring perfectly grazing incoming rays
-        active &= dr::neq(cos_theta_i, 0.0f);
+        active &= cos_theta_i != 0.0f;
 
         if (unlikely(dr::none_or<false>(active)))
             return { bs, 0.0f };
@@ -497,7 +496,7 @@ public:
 
         Float cos_theta_i = Frame3f::cos_theta(si.wi);
         // Ignore perfectly grazing configurations
-        active &= dr::neq(cos_theta_i, 0.0f);
+        active &= cos_theta_i != 0.0f;
 
         if (unlikely(dr::none_or<false>(active)))
             return 0.0f;
@@ -607,7 +606,7 @@ public:
             /* Account for the solid angle compression when tracing
                radiance. This is necessary for bidirectional methods. */
             Float scale = (ctx.mode == TransportMode::Radiance)
-                    ? dr::sqr(inv_eta_path)
+                    ? dr::square(inv_eta_path)
                     : Float(1.0f);
 
             // Adding the specular transmission component
@@ -615,7 +614,7 @@ public:
                     dr::sqrt(base_color) * bsdf *
                     dr::abs((scale * (1.0f - F_spec_dielectric) * D * G * eta_path *
                     eta_path * dr::dot(si.wi, wh) * dr::dot(wo, wh)) /
-                    (cos_theta_i * dr::sqr(dr::dot(si.wi, wh) +
+                    (cos_theta_i * dr::square(dr::dot(si.wi, wh) +
                     eta_path * dr::dot(wo, wh))));
         }
 
@@ -650,7 +649,7 @@ public:
             Float f_diff = (1.0f - 0.5f * Fi) * (1.0f - 0.5f * Fo);
 
             Float cos_theta_d = dr::dot(wh, wo);
-            Float Rr          = 2.0f * roughness * dr::sqr(cos_theta_d);
+            Float Rr          = 2.0f * roughness * dr::square(cos_theta_d);
 
             // Retro reflection
             Float f_retro = Rr * (Fo + Fi + Fo * Fi * (Rr - 1.0f));
@@ -715,7 +714,7 @@ public:
 
         Float cos_theta_i = Frame3f::cos_theta(si.wi);
         // Ignore perfectly grazing configurations.
-        active &= dr::neq(cos_theta_i, 0.0f);
+        active &= cos_theta_i != 0.0f;
 
         if (unlikely(dr::none_or<false>(active)))
             return 0.0f;
@@ -794,8 +793,8 @@ public:
             Float dot_wo_h = dr::dot(wo, wh);
             dwh_dwo_abs    = dr::abs(
                     dr::select(reflect, dr::rcp(4.0f * dot_wo_h),
-                               (dr::sqr(eta_path) * dot_wo_h) /
-                               dr::sqr(dot_wi_h + eta_path * dot_wo_h)));
+                               (dr::square(eta_path) * dot_wo_h) /
+                               dr::square(dot_wi_h + eta_path * dot_wo_h)));
         } else {
             dwh_dwo_abs = dr::abs(dr::rcp(4.0f * dr::dot(wo, wh)));
         }

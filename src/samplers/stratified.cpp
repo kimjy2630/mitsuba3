@@ -79,13 +79,13 @@ public:
     void set_sample_count(uint32_t spp) override {
         // Make sure sample_count is a square number
         m_resolution = 1;
-        while (dr::sqr(m_resolution) < spp)
+        while (dr::square(m_resolution) < spp)
             m_resolution++;
 
-        if (spp != dr::sqr(m_resolution))
-            Log(Warn, "Sample count should be square and power of two, rounding to %i", dr::sqr(m_resolution));
+        if (spp != dr::square(m_resolution))
+            Log(Warn, "Sample count should be square and power of two, rounding to %i", dr::square(m_resolution));
 
-        m_sample_count = dr::sqr(m_resolution);
+        m_sample_count = dr::square(m_resolution);
         m_inv_sample_count = dr::rcp(ScalarFloat(m_sample_count));
         m_inv_resolution   = dr::rcp(ScalarFloat(m_resolution));
         m_resolution_div = m_resolution;
@@ -108,7 +108,7 @@ public:
         return new StratifiedSampler(*this);
     }
 
-    void seed(uint32_t seed, uint32_t wavefront_size) override {
+    void seed(UInt32 seed, uint32_t wavefront_size) override {
         Base::seed(seed, wavefront_size);
         m_permutation_seed = compute_per_sequence_seed(seed);
     }
@@ -155,6 +155,16 @@ public:
     void schedule_state() override {
         Base::schedule_state();
         dr::schedule(m_permutation_seed);
+    }
+
+    void traverse_1_cb_ro(void *payload, void (*fn)(void *, uint64_t)) const override {
+        auto fields = dr::make_tuple(m_rng, m_dimension_index, m_permutation_seed);
+        dr::traverse_1_fn_ro(fields, payload, fn);
+    }
+
+    void traverse_1_cb_rw(void *payload, uint64_t (*fn)(void *, uint64_t)) override {
+        auto fields = dr::tie(m_rng, m_dimension_index, m_permutation_seed);
+        dr::traverse_1_fn_rw(fields, payload, fn);
     }
 
     std::string to_string() const override {

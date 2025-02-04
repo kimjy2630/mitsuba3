@@ -1,8 +1,13 @@
 #pragma once
 
+#define NB_INTRUSIVE_EXPORT MI_EXPORT
+
 #include <mitsuba/mitsuba.h>
 #include <string>
 #include <functional>
+#include <nanobind/intrusive/ref.h>
+
+template <typename T> using ref = nanobind::ref<T>;
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -23,8 +28,8 @@ NAMESPACE_BEGIN(mitsuba)
  */
 class MI_EXPORT_LIB Class {
 public:
-    using ConstructFunctor   = std::function<Object *(const Properties &props)>;
-    using UnserializeFunctor = std::function<Object *(Stream *stream)>;
+    using ConstructFunctor   = std::function<ref<Object> (const Properties &props)>;
+    using UnserializeFunctor = std::function<ref<Object> (Stream *stream)>;
 
     /**
      * \brief Construct a new class descriptor
@@ -106,6 +111,15 @@ public:
      */
     static void static_initialization();
 
+    /** \brif Remove all constructors and unserializers of all classes
+     *
+     * This sets the the construction and unserialization functions of all
+     * classes to nullptr. This should only be necessary if these functions
+     * capture variables that need to be deallocated before calling the
+     * \ref static_shutdown method.
+     */
+    static void static_remove_functors();
+
     /// Free the memory taken by static_initialization()
     static void static_shutdown();
 private:
@@ -135,7 +149,7 @@ extern MI_EXPORT_LIB const Class* m_class;
  * \brief This macro should be invoked in the class declaration of classes
  * that directly or indirectly derive from \ref Object.
  */
-#define MI_DECLARE_CLASS()                         \
+#define MI_DECLARE_CLASS()                          \
     virtual const Class *class_() const override;   \
 public:                                             \
     static Class *m_class;
@@ -228,5 +242,25 @@ template <typename T, std::enable_if_t<is_constructible_v<T, Stream*>, int> = 0>
 Class::UnserializeFunctor get_unserialize_functor() { return [](Stream* s) -> Object* { return new T(s); }; }
 template <typename T, std::enable_if_t<!is_constructible_v<T, Stream*>, int> = 0>
 Class::UnserializeFunctor get_unserialize_functor() { return {}; }
+
 NAMESPACE_END(detail)
+
+#define MI_REGISTRY_PUT(name, ptr)                                             \
+    if constexpr (dr::is_jit_v<Float>) {                                       \
+        jit_registry_put(::mitsuba::detail::get_variant<Float, Spectrum>(),    \
+                         "mitsuba::" name, ptr);                               \
+    }
+
+#define MI_CALL_TEMPLATE_BEGIN(Name)          \
+    DRJIT_CALL_TEMPLATE_BEGIN(mitsuba::Name)
+
+#define MI_CALL_TEMPLATE_END(Name)                                             \
+public:                                                                        \
+    static constexpr const char *variant_() {                                  \
+        return ::mitsuba::detail::get_variant<Ts...>();                        \
+    }                                                                          \
+    static_assert(is_detected_v<detail::has_variant_override, CallSupport_>);  \
+    DRJIT_CALL_END(mitsuba::Name)
+
+
 NAMESPACE_END(mitsuba)

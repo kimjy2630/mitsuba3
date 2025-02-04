@@ -22,7 +22,7 @@ NAMESPACE_BEGIN(mitsuba)
  * \tparam T The underlying point data type (e.g. \c Point2d)
  */
 template <typename Point_> struct BoundingBox {
-    static constexpr size_t Dimension = dr::array_size_v<Point_>;
+    static constexpr size_t Dimension = dr::size_v<Point_>;
     using Point  = Point_;
     using Value  = dr::value_t<Point>;
     using Scalar = dr::scalar_t<Point>;
@@ -53,12 +53,12 @@ template <typename Point_> struct BoundingBox {
 
     /// Test for equality against another bounding box
     bool operator==(const BoundingBox &bbox) const {
-        return dr::all_nested(dr::eq(min, bbox.min) && dr::eq(max, bbox.max));
+        return dr::all_nested((min == bbox.min) && (max == bbox.max));
     }
 
     /// Test for inequality against another bounding box
     bool operator!=(const BoundingBox &bbox) const {
-        return dr::any_nested(dr::neq(min, bbox.min) || dr::neq(max, bbox.max));
+        return dr::any_nested((min != bbox.min) || (max != bbox.max));
     }
 
     /**
@@ -76,7 +76,7 @@ template <typename Point_> struct BoundingBox {
 
     /// Check whether this bounding box has collapsed to a point, line, or plane
     Mask collapsed() const {
-        return dr::any(dr::eq(min, max));
+        return dr::any(min == max);
     }
 
     /// Return the dimension index with the index associated side length
@@ -304,26 +304,39 @@ template <typename Point_> struct BoundingBox {
         using Float  = typename Ray::Float;
         using Vector = typename Ray::Vector;
 
-        /* First, ensure that the ray either has a nonzero slope on each axis,
-           or that its origin on a zero-valued axis is within the box bounds */
-        auto active = dr::all(dr::neq(ray.d, dr::zeros<Vector>()) || ((ray.o > min) || (ray.o < max)));
+        /**
+            An Efficient and Robust Ray–Box Intersection Algorithm.
+            Amy Williams et al. 2004.
+        */
 
-        // Compute intersection intervals for each axis
-        Vector d_rcp = dr::rcp(ray.d),
-               t1 = (min - ray.o) * d_rcp,
-               t2 = (max - ray.o) * d_rcp;
+        // Ensure that the ray either has a nonzero slope on each axis
+        auto active = dr::any(ray.d != dr::zeros<Vector>());
+        
+        Vector d_rcp = dr::rcp(ray.d);
 
-        // Ensure proper ordering
-        Vector t1p = dr::minimum(t1, t2),
-               t2p = dr::maximum(t1, t2);
+        Vector t_min = (dr::select(d_rcp >= 0, min, max) - ray.o) * d_rcp,
+               t_max = (dr::select(d_rcp >= 0, max, min) - ray.o) * d_rcp;
 
-        // Intersect intervals
-        Float mint = dr::max(t1p),
-              maxt = dr::min(t2p);
+        // Nan-safe minimum/maximum
+        auto maximum_safe = [&](Float a, Float b){
+            return dr::select(a > b || !dr::isfinite(b), a, b);
+        };
 
-        active = active && maxt >= mint;
+        auto minimum_safe = [&](Float a, Float b){
+            return dr::select(a < b || !dr::isfinite(b), a, b);
+        };
 
-        return std::make_tuple(active, mint, maxt);
+        active = active && !((t_min.x() > t_max.y()) || (t_min.y() > t_max.x()));
+
+        t_min.x() = maximum_safe(t_min.x(), t_min.y());
+        t_max.x() = minimum_safe(t_max.x(), t_max.y());
+
+        active = active && !((t_min.x() > t_max.z()) || (t_min.z() > t_max.x()));
+
+        t_min.x() = maximum_safe(t_min.x(), t_min.z());
+        t_max.x() = minimum_safe(t_max.x(), t_max.z());
+
+        return std::make_tuple(active, t_min.x(), t_max.x());
     }
 
     /// Create a bounding sphere, which contains the axis-aligned box

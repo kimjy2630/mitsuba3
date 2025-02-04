@@ -5,8 +5,8 @@
 #include <mitsuba/core/hash.h>
 #include <mitsuba/core/jit.h>
 #include <drjit/array.h>
-#include <drjit/half.h>
 #include <drjit/color.h>
+#include <drjit-core/half.h>
 #include <unordered_map>
 #include <ostream>
 #include <map>
@@ -635,7 +635,7 @@ public:
             if (field.type == Struct::Type::Float16) {
                 auto ref = cc.newUInt16Const(
                     asmjit::ConstPoolScope::kGlobal,
-                    dr::half::float32_to_float16((float) field.default_));
+                    dr::half((float) field.default_).value);
                 cc.cmp(value.gp.r16(), ref);
             } else if (field.type == Struct::Type::Float32) {
                 auto ref = cc.newFloatConst(asmjit::ConstPoolScope::kGlobal, (float) field.default_);
@@ -1243,6 +1243,10 @@ static std::unordered_map<
     hasher<std::pair<ref<const Struct>, ref<const Struct>>>,
     comparator<std::pair<ref<const Struct>, ref<const Struct>>>> __cache;
 
+void StructConverter::static_shutdown() {
+    __cache.clear();
+}
+
 StructConverter::StructConverter(const Struct *source, const Struct *target, bool dither)
  : m_source(source), m_target(target) {
 #if MI_STRUCTCONVERTER_USE_JIT == 1
@@ -1568,7 +1572,7 @@ bool StructConverter::load(const uint8_t *src, const Struct::Field &f, Value &va
                 uint16_t val = *((const uint16_t *) src);
                 if (source_swap)
                     val = detail::swap(val);
-                value.s = dr::half::float16_to_float32(val);
+                value.s = (float)dr::half::from_binary(val);
                 value.type = Struct::Type::Float32;
             }
             break;
@@ -1725,7 +1729,7 @@ void StructConverter::save(uint8_t *dst, const Struct::Field &f, Value value, si
             break;
 
         case Struct::Type::Float16: {
-                uint16_t val = dr::half::float32_to_float16(value.s);
+                uint16_t val = dr::half(value.s).value;
                 if (target_swap)
                     val = detail::swap(val);
                 *((uint16_t *) dst) = val;

@@ -25,7 +25,6 @@ reference data (e.g. for a new configurations). Please see the following command
 
 import drjit as dr
 import mitsuba as mi
-import importlib
 
 import pytest, os, argparse
 from os.path import join, exists
@@ -61,7 +60,7 @@ class ConfigBase:
 
         self.sensor_dict = {
             'type': 'perspective',
-            'to_world': T.look_at(origin=[0, 0, 4], target=[0, 0, 0], up=[0, 1, 0]),
+            'to_world': T().look_at(origin=[0, 0, 4], target=[0, 0, 0], up=[0, 1, 0]),
             'film': {
                 'type': 'hdrfilm',
                 'rfilter': { 'type': 'gaussian', 'stddev': 0.5 },
@@ -126,7 +125,7 @@ class DiffuseAlbedoConfig(ConfigBase):
             },
             'sphere': {
                 'type': 'sphere',
-                'to_world': T.scale(0.25),
+                'to_world': T().scale(0.25),
             },
             'light': { 'type': 'constant' }
         }
@@ -141,7 +140,7 @@ class DiffuseAlbedoGIConfig(ConfigBase):
             'plane': { 'type': 'rectangle' },
             'sphere': {
                 'type': 'sphere',
-                'to_world': T.scale(0.25)
+                'to_world': T().scale(0.25)
             },
             'green': {
                 'type': 'rectangle',
@@ -152,7 +151,7 @@ class DiffuseAlbedoGIConfig(ConfigBase):
                         'value': [0.1, 1.0, 0.1]
                     }
                 },
-                'to_world': T.translate([1.25, 0.0, 1.0]) @ T.rotate([0, 1, 0], -90),
+                'to_world': T().translate([1.25, 0.0, 1.0]) @ T().rotate([0, 1, 0], -90),
             },
             'light': { 'type': 'constant', 'radiance': 3.0 }
         }
@@ -176,11 +175,11 @@ class AreaLightRadianceConfig(ConfigBase):
             },
             'sphere': {
                 'type': 'sphere',
-                'to_world': T.scale(0.25),
+                'to_world': T().scale(0.25),
             },
             'light': {
                 'type': 'rectangle',
-                'to_world': T.translate([1.25, 0.0, 1.0]) @ T.rotate([0, 1, 0], -90),
+                'to_world': T().translate([1.25, 0.0, 1.0]) @ T().rotate([0, 1, 0], -90),
                 'emitter': {
                     'type': 'area',
                     'radiance': {'type': 'rgb', 'value': [3.0, 3.0, 3.0]}
@@ -220,7 +219,7 @@ class PointLightIntensityConfig(ConfigBase):
             },
             'sphere': {
                 'type': 'sphere',
-                'to_world': T.scale(0.25),
+                'to_world': T().scale(0.25),
             },
             'light': {
                 'type': 'point',
@@ -242,7 +241,7 @@ class ConstantEmitterRadianceConfig(ConfigBase):
             },
             'sphere': {
                 'type': 'sphere',
-                'to_world': T.scale(0.25),
+                'to_world': T().scale(0.25),
             },
             'light': { 'type': 'constant' }
         }
@@ -263,7 +262,7 @@ class CropWindowConfig(ConfigBase):
         self.res = 64
         self.sensor_dict = {
             'type': 'perspective',
-            'to_world': T.look_at(origin=[0, 0, 4], target=[0, 0, 0], up=[0, 1, 0]),
+            'to_world': T().look_at(origin=[0, 0, 4], target=[0, 0, 0], up=[0, 1, 0]),
             'film': {
                 'type': 'hdrfilm',
                 'rfilter': { 'type': 'gaussian', 'stddev': 0.5 },
@@ -323,7 +322,7 @@ class TranslateDiffuseSphereConstantConfig(TranslateShapeConfigBase):
             'sphere': {
                 'type': 'obj',
                 'filename': 'resources/data/common/meshes/sphere.obj',
-                'to_world': T.rotate(angle=-90, axis=[0, 1, 0]),
+                'to_world': T().rotate(angle=-90, axis=[0, 1, 0]),
             },
             'light': { 'type': 'constant' }
         }
@@ -372,7 +371,7 @@ class TranslateRectangleEmitterOnBlackConfig(TranslateShapeConfigBase):
                     'type': 'area',
                     'radiance': {'type': 'rgb', 'value': [1.0, 1.0, 1.0]}
                 },
-                'to_world': T.translate([1.25, 0.0, 0.0]),
+                'to_world': T().translate([1.25, 0.0, 0.0]),
             }
         }
         self.ref_fd_epsilon = 1e-3
@@ -398,7 +397,7 @@ class TranslateSphereEmitterOnBlackConfig(TranslateShapeConfigBase):
                     'type': 'area',
                     'radiance': {'type': 'rgb', 'value': [1.0, 1.0, 1.0]}
                 },
-                'to_world': T.translate([1.25, 0.0, 0.0]) @ T.rotate(angle=180, axis=[0, 1, 0]),
+                'to_world': T().translate([1.25, 0.0, 0.0]) @ T().rotate(angle=180, axis=[0, 1, 0]),
             }
         }
         self.ref_fd_epsilon = 1e-4
@@ -446,7 +445,7 @@ class TranslateOccluderAreaLightConfig(TranslateShapeConfigBase):
             'occluder': {
                 'type': 'obj',
                 'filename': 'resources/data/common/meshes/sphere.obj',
-                'to_world': T.translate([2.0, 0.0, 2.0]) @ T.scale(0.25),
+                'to_world': T().translate([2.0, 0.0, 2.0]) @ T().scale(0.25),
             },
             'light': {
                 'type': 'obj',
@@ -455,7 +454,7 @@ class TranslateOccluderAreaLightConfig(TranslateShapeConfigBase):
                     'type': 'area',
                     'radiance': {'type': 'rgb', 'value': [1000.0, 1000.0, 1000.0]}
                 },
-                'to_world': T.translate([4.0, 0.0, 4.0]) @ T.scale(0.05)
+                'to_world': T().translate([4.0, 0.0, 4.0]) @ T().scale(0.05)
             }
         }
         self.ref_fd_epsilon = 1e-3
@@ -482,7 +481,7 @@ class TranslateShadowReceiverAreaLightConfig(TranslateShapeConfigBase):
             'occluder': {
                 'type': 'obj',
                 'filename': 'resources/data/common/meshes/sphere.obj',
-                'to_world': T.translate([2.0, 0.0, 2.0]) @ T.scale(0.25),
+                'to_world': T().translate([2.0, 0.0, 2.0]) @ T().scale(0.25),
             },
             # 'light': {
             #     'type': 'obj',
@@ -491,7 +490,7 @@ class TranslateShadowReceiverAreaLightConfig(TranslateShapeConfigBase):
             #         'type': 'area',
             #         'radiance': {'type': 'rgb', 'value': [1000.0, 1000.0, 1000.0]}
             #     },
-            #     'to_world': T.translate([4.0, 0.0, 4.0]) @ T.scale(0.05)
+            #     'to_world': T().translate([4.0, 0.0, 4.0]) @ T().scale(0.05)
             # }
             'light': { 'type': 'constant' }
         }
@@ -521,10 +520,11 @@ class TranslateTexturedPlaneConfig(TranslateShapeConfigBase):
                     'reflectance' : {
                         'type': 'bitmap',
                         # 'filename' : 'resources/data/common/textures/flower.bmp'
-                        'filename' : 'resources/data/common/textures/museum.exr'
+                        'filename' : 'resources/data/common/textures/museum.exr',
+                        'format' : 'variant'
                     }
                 },
-                'to_world': T.scale(2.0),
+                'to_world': T().scale(2.0),
             },
             'light': { 'type': 'constant' }
         }
@@ -549,7 +549,7 @@ class TranslateSelfShadowAreaLightConfig(ConfigBase):
                 'type': 'obj',
                 'filename': 'resources/data/common/meshes/rectangle.obj',
                 'face_normals': True,
-                'to_world': T.translate([-1, 0, 0.5]) @ T.rotate([0, 1, 0], 90) @ T.scale(1.0),
+                'to_world': T().translate([-1, 0, 0.5]) @ T().rotate([0, 1, 0], 90) @ T().scale(1.0),
             },
             'light': {
                 'type': 'point',
@@ -591,7 +591,7 @@ class TranslateSphereOnGlossyFloorConfig(TranslateShapeConfigBase):
                     'type': 'roughconductor',
                     'alpha': 0.025,
                 },
-                'to_world': T.translate([0, 1.5, 0]) @ T.rotate([1, 0, 0], -45) @ T.scale(4),
+                'to_world': T().translate([0, 1.5, 0]) @ T().rotate([1, 0, 0], -45) @ T().scale(4),
             },
             'sphere': {
                 'type': 'obj',
@@ -600,7 +600,7 @@ class TranslateSphereOnGlossyFloorConfig(TranslateShapeConfigBase):
                     'reflectance': {'type': 'rgb', 'value': [1.0, 0.5, 0.0]}
                 },
                 'filename': 'resources/data/common/meshes/sphere.obj',
-                'to_world': T.translate([0.5, 2.0, 1.5]) @ T.scale(1.0),
+                'to_world': T().translate([0.5, 2.0, 1.5]) @ T().scale(1.0),
             },
             'light': { 'type': 'constant', 'radiance': 1.0 },
         }
@@ -647,6 +647,48 @@ class TranslateCameraConfig(ConfigBase):
         self.params.update()
         dr.eval()
 
+
+# Rotate plane's shading normals (no discontinuities)
+class RotateShadingNormalsPlaneConfig(ConfigBase):
+    def __init__(self) -> None:
+        super().__init__()
+        self.key = 'plane.vertex_normals'
+        self.scene_dict = {
+            'type': 'scene',
+            'plane': {
+                'type': 'obj',
+                'filename': 'resources/data/common/meshes/rectangle.obj',
+                'bsdf': { 'type': 'diffuse' },
+            },
+            'light': {
+                'type': 'rectangle',
+                'to_world': T().translate([1.25, 0.0, 1.0]) @ T().rotate([0, 1, 0], -90),
+                'emitter': {
+                    'type': 'area',
+                    'radiance': {'type': 'rgb', 'value': [3.0, 3.0, 3.0]}
+                }
+            }
+        }
+        self.integrator_dict = {
+            'max_depth': 2,
+        }
+        self.error_mean_threshold = 0.02
+        self.error_max_threshold = 0.3
+
+    def initialize(self):
+        super().initialize()
+        self.params.keep([self.key])
+        self.initial_state = mi.Float(self.params[self.key])
+
+    def update(self, theta):
+        self.params[self.key] = dr.ravel(
+            mi.Transform4f().rotate(angle=theta, axis=[0.0, 1.0, 0.0]) @
+            dr.unravel(mi.Normal3f, self.initial_state)
+        )
+        self.params.update()
+        dr.eval()
+
+
 # -------------------------------------------------------------------
 #                           List configs
 # -------------------------------------------------------------------
@@ -658,6 +700,7 @@ BASIC_CONFIGS_LIST = [
     DirectlyVisibleAreaLightRadianceConfig,
     TranslateTexturedPlaneConfig,
     CropWindowConfig,
+    RotateShadingNormalsPlaneConfig,
 
     # The next two configs have issues with Nvidia driver v545
     # PointLightIntensityConfig,
@@ -674,7 +717,7 @@ DISCONTINUOUS_CONFIGS_LIST = [
     TranslateSelfShadowAreaLightConfig,
     # TranslateShadowReceiverAreaLightConfig,
     TranslateSphereOnGlossyFloorConfig,
-    #TranslateCameraConfig
+    # TranslateCameraConfig
 ]
 
 # List of configs that fail on integrators with depth less than three
@@ -711,10 +754,7 @@ def test01_rendering_primal(variants_all_ad_rgb, integrator_name, config):
     config = config()
     config.initialize()
 
-    import mitsuba
-    importlib.reload(mitsuba.ad.integrators)
     config.integrator_dict['type'] = integrator_name
-
     integrator = mi.load_dict(config.integrator_dict, parallel=False)
 
     filename = join(output_dir, f"test_{config.name}_image_primal_ref.exr")
@@ -722,8 +762,8 @@ def test01_rendering_primal(variants_all_ad_rgb, integrator_name, config):
     image = integrator.render(config.scene, seed=0, spp=config.spp)
 
     error = dr.abs(image - image_primal_ref) / dr.maximum(dr.abs(image_primal_ref), 2e-2)
-    error_mean = dr.mean(error)[0]
-    error_max = dr.max(error)[0]
+    error_mean = dr.mean(error, axis=None)
+    error_max = dr.max(error, axis=None)
 
     if error_mean > config.error_mean_threshold  or error_max > config.error_max_threshold:
         print(f"Failure in config: {config.name}, {integrator_name}")
@@ -733,7 +773,7 @@ def test01_rendering_primal(variants_all_ad_rgb, integrator_name, config):
         filename = join(os.getcwd(), f"test_{integrator_name}_{config.name}_image_primal.exr")
         print(f'-> write current image: {filename}')
         mi.util.write_bitmap(filename, image)
-        assert False
+        pytest.fail("Radiance values exceeded configuration's tolerances!")
 
 
 @pytest.mark.slow
@@ -743,10 +783,7 @@ def test02_rendering_forward(variants_all_ad_rgb, integrator_name, config):
     config = config()
     config.initialize()
 
-    import mitsuba
-    importlib.reload(mitsuba.ad.integrators)
     config.integrator_dict['type'] = integrator_name
-
     integrator = mi.load_dict(config.integrator_dict)
     if 'projective' in integrator_name:
         integrator.proj_seed_spp = 2048 * 2
@@ -769,8 +806,8 @@ def test02_rendering_forward(variants_all_ad_rgb, integrator_name, config):
     image_fwd = dr.detach(image_fwd)
 
     error = dr.abs(image_fwd - image_fwd_ref) / dr.maximum(dr.abs(image_fwd_ref), 2e-1)
-    error_mean = dr.mean(error)[0]
-    error_max = dr.max(error)[0]
+    error_mean = dr.mean(error, axis=None)
+    error_max = dr.max(error, axis=None)
 
     if error_mean > config.error_mean_threshold or error_max > config.error_max_threshold:
         print(f"Failure in config: {config.name}, {integrator_name}")
@@ -783,7 +820,7 @@ def test02_rendering_forward(variants_all_ad_rgb, integrator_name, config):
         filename = join(os.getcwd(), f"test_{integrator_name}_{config.name}_image_error.exr")
         print(f'-> write error image: {filename}')
         mi.util.write_bitmap(filename, error)
-        assert False
+        pytest.fail("Gradient values exceeded configuration's tolerances!")
 
 
 @pytest.mark.slow
@@ -793,8 +830,6 @@ def test03_rendering_backward(variants_all_ad_rgb, integrator_name, config):
     config = config()
     config.initialize()
 
-    import mitsuba
-    importlib.reload(mitsuba.ad.integrators)
     config.integrator_dict['type'] = integrator_name
 
     integrator = mi.load_dict(config.integrator_dict)
@@ -805,7 +840,7 @@ def test03_rendering_backward(variants_all_ad_rgb, integrator_name, config):
     image_fwd_ref = mi.TensorXf(mi.Bitmap(filename))
 
     grad_in = 0.001
-    image_adj = mi.TensorXf(grad_in, image_fwd_ref.shape)
+    image_adj = dr.full(mi.TensorXf, grad_in, image_fwd_ref.shape)
 
     theta = mi.Float(0.0)
     dr.enable_grad(theta)
@@ -815,8 +850,8 @@ def test03_rendering_backward(variants_all_ad_rgb, integrator_name, config):
     integrator.render_backward(
         config.scene, grad_in=image_adj, seed=0, spp=256, params=theta)
 
-    grad = dr.grad(theta)[0] / dr.width(image_fwd_ref)
-    grad_ref = dr.mean(image_fwd_ref)[0] * grad_in
+    grad = dr.grad(theta) / dr.width(image_fwd_ref)
+    grad_ref = dr.mean(image_fwd_ref, axis=None) * grad_in
 
     error = dr.abs(grad - grad_ref) / dr.maximum(dr.abs(grad_ref), 1e-3)
     if error > config.error_mean_threshold_bwd:
@@ -825,7 +860,7 @@ def test03_rendering_backward(variants_all_ad_rgb, integrator_name, config):
         print(f"-> grad_ref: {grad_ref}")
         print(f"-> error: {error} (threshold={config.error_mean_threshold_bwd})")
         print(f"-> ratio: {grad / grad_ref}")
-        assert False
+        pytest.fail("Gradient values exceeded configuration's tolerances!")
 
 
 @pytest.mark.slow
@@ -834,9 +869,6 @@ def test04_render_custom_op(variants_all_ad_rgb):
     config = DiffuseAlbedoConfig()
     config.initialize()
 
-    # Primal comparison
-    import mitsuba
-    importlib.reload(mitsuba.ad.integrators)
     integrator = mi.load_dict({
         'type': 'prb',
         'max_depth': config.integrator_dict['max_depth']
@@ -856,8 +888,8 @@ def test04_render_custom_op(variants_all_ad_rgb):
     image_primal = mi.render(config.scene, config.params, integrator=integrator, seed=0, spp=256)
 
     error = dr.abs(dr.detach(image_primal) - image_primal_ref) / dr.maximum(dr.abs(image_primal_ref), 2e-2)
-    error_mean = dr.mean(error)[0]
-    error_max = dr.max(error)[0]
+    error_mean = dr.mean(error, axis=None)
+    error_max = dr.max(error, axis=None)
 
     if error_mean > config.error_mean_threshold  or error_max > config.error_max_threshold:
         print(f"Failure in config: {config.name}, {integrator_name}")
@@ -867,14 +899,14 @@ def test04_render_custom_op(variants_all_ad_rgb):
         filename = join(os.getcwd(), f"test_{integrator_name}_{config.name}_image_primal.exr")
         print(f'-> write current image: {filename}')
         mi.util.write_bitmap(filename, image_primal)
-        assert False
+        pytest.fail("Radiance values exceeded configuration's tolerances!")
 
     # Backward comparison
-    obj = dr.mean(image_primal)
+    obj = dr.mean(image_primal, axis=None)
     dr.backward(obj)
 
     grad = dr.grad(theta)[0]
-    grad_ref = dr.mean(image_fwd_ref)[0]
+    grad_ref = dr.mean(image_fwd_ref, axis=None)
 
     error = dr.abs(grad - grad_ref) / dr.maximum(dr.abs(grad_ref), 1e-3)
     if error > config.error_mean_threshold:
@@ -883,7 +915,7 @@ def test04_render_custom_op(variants_all_ad_rgb):
         print(f"-> grad_ref: {grad_ref}")
         print(f"-> error: {error} (threshold={config.error_mean_threshold})")
         print(f"-> ratio: {grad / grad_ref}")
-        assert False
+        pytest.fail("Gradient values exceeded configuration's tolerances!")
 
     # Forward comparison
     theta = mi.Float(0.0)
@@ -897,8 +929,8 @@ def test04_render_custom_op(variants_all_ad_rgb):
     image_fwd = dr.grad(image_primal)
 
     error = dr.abs(image_fwd - image_fwd_ref) / dr.maximum(dr.abs(image_fwd_ref), 2e-1)
-    error_mean = dr.mean(error)[0]
-    error_max = dr.max(error)[0]
+    error_mean = dr.mean(error, axis=None)
+    error_max = dr.max(error, axis=None)
 
     if error_mean > config.error_mean_threshold or error_max > config.error_max_threshold:
         print(f"Failure in config: {config.name}, {integrator_name}")
@@ -908,7 +940,7 @@ def test04_render_custom_op(variants_all_ad_rgb):
         mi.util.write_bitmap(filename, image_fwd)
         filename = join(os.getcwd(), f"test_{integrator_name}_{config.name}_image_error.exr")
         mi.util.write_bitmap(filename, error)
-        assert False
+        pytest.fail("Gradient values exceeded configuration's tolerances!")
 
 # -------------------------------------------------------------------
 #                      Generate reference images

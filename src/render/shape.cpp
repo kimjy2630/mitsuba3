@@ -71,13 +71,7 @@ MI_VARIANT Shape<Float, Spectrum>::Shape(const Properties &props) : m_id(props.i
 
     m_silhouette_sampling_weight = props.get<ScalarFloat>("silhouette_sampling_weight", 1.0f);
 
-    dr::set_attr(this, "emitter", m_emitter.get());
-    dr::set_attr(this, "sensor", m_sensor.get());
-    dr::set_attr(this, "bsdf", m_bsdf.get());
-    dr::set_attr(this, "interior_medium", m_interior_medium.get());
-    dr::set_attr(this, "exterior_medium", m_exterior_medium.get());
-    dr::set_attr(this, "silhouette_sampling_weight", m_silhouette_sampling_weight);
-    dr::set_attr(this, "shape_type", m_shape_type);
+    MI_REGISTRY_PUT("Shape", this);
 }
 
 MI_VARIANT Shape<Float, Spectrum>::~Shape() {
@@ -85,6 +79,9 @@ MI_VARIANT Shape<Float, Spectrum>::~Shape() {
     if constexpr (dr::is_cuda_v<Float>)
         jit_free(m_optix_data_ptr);
 #endif
+
+    if constexpr (dr::is_jit_v<Float>)
+        jit_registry_remove(this);
 }
 
 MI_VARIANT typename Shape<Float, Spectrum>::PositionSample3f
@@ -181,7 +178,7 @@ static void embree_intersect_packet(int *valid, void *geometryUserPtr,
 
     const Shape* shape = (const Shape*) geometryUserPtr;
 
-    MaskP active = dr::neq(dr::load_aligned<UInt32P>(valid), 0);
+    MaskP active = dr::load_aligned<UInt32P>(valid) != 0;
     if (dr::none(active))
         return;
 
@@ -203,7 +200,7 @@ static void embree_intersect_packet(int *valid, void *geometryUserPtr,
     // Check whether this is a shadow ray or not
     if (rtc_hit) {
         auto [t, prim_uv, s_idx, p_idx] = shape->ray_intersect_preliminary_packet(ray, primID, active);
-        active &= dr::neq(t, dr::Infinity<Float>);
+        active &= (t != dr::Infinity<Float>);
         dr::store_aligned(rtc_ray->tfar,      Float32P(dr::select(active, t,           ray.maxt)));
         dr::store_aligned(rtc_hit->u,         Float32P(dr::select(active, prim_uv.x(), dr::load_aligned<Float32P>(rtc_hit->u))));
         dr::store_aligned(rtc_hit->v,         Float32P(dr::select(active, prim_uv.y(), dr::load_aligned<Float32P>(rtc_hit->v))));
@@ -327,7 +324,7 @@ void Shape<Float, Spectrum>::optix_fill_hitgroup_records(std::vector<HitGroupSbt
     // Set hitgroup record data
     hitgroup_records.push_back(HitGroupSbtRecord());
     hitgroup_records.back().data = {
-        jit_registry_get_id(JitBackend::CUDA, this), m_optix_data_ptr
+        jit_registry_id(this), m_optix_data_ptr
     };
 
     size_t program_group_idx = (is_mesh() ? 1 : 2 + get_shape_descr_idx(this));
@@ -382,7 +379,7 @@ MI_VARIANT Float Shape<Float, Spectrum>::pdf_direction(const Interaction3f & /*i
     Float pdf = pdf_position(ds, active),
            dp = dr::abs_dot(ds.d, ds.n);
 
-    pdf *= dr::select(dr::neq(dp, 0.f), (ds.dist * ds.dist) / dp, 0.f);
+    pdf *= dr::select(dp != 0.f, (ds.dist * ds.dist) / dp, 0.f);
 
     return pdf;
 }
@@ -468,7 +465,7 @@ Shape<Float, Spectrum>::ray_intersect_preliminary_scalar(const ScalarRay3f & /*r
                                             uint32_t prim_index,                                    \
                                             MaskP##N active) const {                                \
         auto res = ray_intersect_preliminary_packet(ray, prim_index, active);                       \
-        return dr::neq(std::get<0>(res), dr::Infinity<Float>);                                      \
+        return std::get<0>(res) != dr::Infinity<Float>;                                             \
     }
 
 MI_DEFAULT_RAY_INTERSECT_PACKET(4)
@@ -634,6 +631,8 @@ MI_VARIANT void Shape<Float, Spectrum>::initialize() {
         m_emitter->set_shape(this);
     if (m_sensor)
         m_sensor->set_shape(this);
+
+    m_initialized = true;
 }
 
 MI_VARIANT

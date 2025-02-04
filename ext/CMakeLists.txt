@@ -33,6 +33,11 @@ if (MI_PROFILER_NVTX)
 endif()
 
 if (NOT SKBUILD)
+  if (MSVC)
+    set(DRJIT_PYTHON_DST_DIR "${MI_BINARY_DIR}/python/drjit")
+  else()
+    set(DRJIT_PYTHON_DST_DIR "${CMAKE_CURRENT_BINARY_DIR}/../python/drjit")
+  endif()
   add_subdirectory(drjit)
 
   if (NOT MI_ENABLE_JIT)
@@ -47,16 +52,7 @@ if (NOT SKBUILD)
   endif()
 
   if (MI_ENABLE_AUTODIFF)
-    set_target_properties(drjit-autodiff PROPERTIES FOLDER "drjit")
-    if (TARGET drjit-autodiff-scalar-f32)
-      set_target_properties(drjit-autodiff-scalar-f32 drjit-autodiff-scalar-f64 PROPERTIES FOLDER "drjit")
-    endif()
-    if (TARGET drjit-autodiff-cuda-f32)
-      set_target_properties(drjit-autodiff-cuda-f32 drjit-autodiff-cuda-f64 PROPERTIES FOLDER "drjit")
-    endif()
-    if (TARGET drjit-autodiff-llvm-f32)
-      set_target_properties(drjit-autodiff-llvm-f32 drjit-autodiff-llvm-f64 PROPERTIES FOLDER "drjit")
-    endif()
+    set_target_properties(drjit-extra PROPERTIES FOLDER "drjit")
   endif()
 
   if (MI_ENABLE_PYTHON)
@@ -98,13 +94,18 @@ if (MI_ENABLE_EMBREE)
   set(EMBREE_TASKING_SYSTEM            "INTERNAL" CACHE STRING " " FORCE)
   set(EMBREE_ISA_SSE2                  OFF CACHE BOOL " " FORCE)
 
-  if (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  if ((CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
+    set(EMBREE_ISA_SSE42            OFF CACHE BOOL " " FORCE)
     set(EMBREE_ISA_SSE42            OFF CACHE BOOL " " FORCE)
     set(EMBREE_ISA_AVX              OFF CACHE BOOL " " FORCE)
     set(EMBREE_ISA_AVX2             OFF CACHE BOOL " " FORCE)
     set(EMBREE_ISA_AVX512           OFF CACHE BOOL " " FORCE)
     set(EMBREE_ISA_NEON             ON CACHE BOOL " " FORCE)
-    set(EMBREE_ISA_NEON2X           ON CACHE BOOL " " FORCE)
+    if (APPLE)
+      set(EMBREE_ISA_NEON2X           ON CACHE BOOL " " FORCE)
+    else()
+      set(EMBREE_ISA_NEON2X           OFF CACHE BOOL " " FORCE)
+    endif()
   else()
     set(EMBREE_ISA_SSE42            ON CACHE BOOL " " FORCE)
     set(EMBREE_ISA_AVX              ON CACHE BOOL " " FORCE)
@@ -176,6 +177,10 @@ if (WIN32)
     ZLIB_BUILD_SHARED_LIBS ZLIB_BUILD_STATIC_LIBS)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  add_compile_options(-Wno-unused-parameter -Wno-unused-but-set-variable -Wno-sign-compare)
+endif()
+
 # Prevents openexr to set the DEBUG_POSTFIX "_d"
 set(CMAKE_DEBUG_POSTFIX "" CACHE STRING " " FORCE)
 set(ILMBASE_LIB_SUFFIX  "" CACHE STRING "" FORCE)
@@ -191,6 +196,13 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 unset(CMAKE_CXX_VISIBILITY_PRESET)
 add_subdirectory(openexr)
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+
+if (MSVC)
+  target_compile_options(Half PRIVATE /W2)
+  target_compile_options(IlmThread PRIVATE /W2)
+  target_compile_options(Imath PRIVATE /W2)
+  target_compile_options(IlmImf PRIVATE /W1)
+endif()
 
 set_property(TARGET
   IexMath IlmThread Half Iex Imath IlmImf IexMath IlmImfUtil
@@ -333,6 +345,10 @@ add_subdirectory(rgb2spec)
 set(RGB2SPEC_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/rgb2spec PARENT_SCOPE)
 set_target_properties(rgb2spec rgb2spec_opt rgb2spec_opt_run PROPERTIES FOLDER "dependencies/rgb2spec")
 
+if (MSVC)
+  target_compile_options(rgb2spec_opt PRIVATE "/wd4849" "/wd4456")
+endif()
+
 # ----------------------------------------------------------
 #  Fast floating point parser (interface library)
 # ----------------------------------------------------------
@@ -343,6 +359,12 @@ mark_as_advanced(
   FASTFLOAT_TEST
 )
 unset(CMAKE_CXX_STANDARD CACHE)
+
+# ----------------------------------------------------------
+#  Nanobind headers
+# ----------------------------------------------------------
+
+set(NANOBIND_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/nanobind/include PARENT_SCOPE)
 
 # ----------------------------------------------------------
 #  Hide a few more settings that aren't relevant for users

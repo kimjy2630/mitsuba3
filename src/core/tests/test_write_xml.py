@@ -5,7 +5,7 @@ import numpy as np
 import os
 from shutil import copy
 
-from mitsuba.scalar_rgb.test.util import fresolver_append_path
+from mitsuba.test.util import fresolver_append_path
 
 
 @fresolver_append_path
@@ -265,7 +265,7 @@ def test09_xml_decompose_transform(variants_all_rgb, tmp_path):
             'type': 'perspective',
             'fov_axis': 'x',
             'fov': 35,
-            'to_world': mi.ScalarTransform4f.look_at([15,42.3,25], [1.0,0.0,0.5], [1.0,0.0,0.0])
+            'to_world': mi.ScalarTransform4f().look_at([15,42.3,25], [1.0,0.0,0.5], [1.0,0.0,0.0])
         }
     }
     mi.xml.dict_to_xml(scene_dict, filepath)

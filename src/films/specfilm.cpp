@@ -210,16 +210,25 @@ public:
         // Compute resolution of the discretized PDF used for sampling
         size_t n_points = (size_t) dr::ceil((m_range.y() - m_range.x()) / resolution + 1);
         FloatStorage mis_data = dr::zeros<FloatStorage>(n_points);
-        Float mis_wavelengths = dr::linspace<Float>(m_range.x(), m_range.y(), n_points);
+        FloatStorage mis_wavelengths = dr::linspace<FloatStorage>(m_range.x(), m_range.y(), n_points);
 
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
-        si.wavelengths = mis_wavelengths;
-
-        for (auto srf : m_srfs) {
-            UnpolarizedSpectrum values = srf->eval(si);
-            // Each wavelength is duplicated with the size of the Spectrum
-            // (default constructor while initialized with only a number)
-            mis_data += values.x();
+        // Each wavelength is duplicated with the size of the Spectrum (default
+        // constructor while initialized with only a number)
+        if constexpr (dr::is_jit_v<Float>) {
+            si.wavelengths = mis_wavelengths;
+            for (auto srf : m_srfs) {
+                UnpolarizedSpectrum values = srf->eval(si);
+                mis_data += values.x();
+            }
+        } else {
+            for (size_t i = 0; i < n_points; ++i) {
+                si.wavelengths = mis_wavelengths[i];
+                for (auto srf : m_srfs) {
+                    UnpolarizedSpectrum values = srf->eval(si);
+                    mis_data[i] += values.x();
+                }
+            }
         }
 
         // Conversion needed because Properties::Float is always double
@@ -267,7 +276,7 @@ public:
 
     ref<ImageBlock> create_block(const ScalarVector2u &size, bool normalize,
                                  bool border) override {
-        bool default_config = size == ScalarVector2u(0);
+        bool default_config = dr::all(size == ScalarVector2u(0));
 
         return new ImageBlock(default_config ? m_crop_size : size,
                               default_config ? m_crop_offset : ScalarPoint2u(0),
@@ -289,7 +298,7 @@ public:
 
         // The SRF is not necessarily normalized, cancel out multiplicative factors
         UnpolarizedSpectrum inv_spec = m_srf->eval(si);
-        inv_spec = dr::select(dr::neq(inv_spec, 0.f), dr::rcp(inv_spec), 1.f);
+        inv_spec = dr::select(inv_spec != 0.f, dr::rcp(inv_spec), 1.f);
         UnpolarizedSpectrum values = spec * inv_spec;
 
         for (size_t j = 0; j < m_srfs.size(); ++j) {
@@ -356,7 +365,7 @@ public:
                   values = dr::gather<Float>(data, values_idx);
 
             // Perform the weight division unless the weight is zero
-            values /= dr::select(dr::eq(weight, 0.f), 1.f, weight);
+            values /= dr::select(weight == 0.f, 1.f, weight);
 
             size_t shape[3] = { (size_t) size.y(), (size_t) size.x(),
                                 target_ch };

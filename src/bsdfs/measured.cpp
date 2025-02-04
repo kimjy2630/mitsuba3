@@ -81,7 +81,6 @@ public:
     Measured(const Properties &props) : Base(props) {
         m_components.push_back(BSDFFlags::GlossyReflection | BSDFFlags::FrontSide);
         m_flags = m_components[0];
-        dr::set_attr(this, "flags", m_flags);
 
         auto fs            = Thread::thread()->file_resolver();
         fs::path file_path = fs->resolve(props.string("filename"));
@@ -236,7 +235,7 @@ public:
      *     safe_acos(Frame3f::cos_theta(d))
      */
     auto elevation(const Vector3f &d) const {
-        auto dist = dr::sqrt(dr::sqr(d.x()) + dr::sqr(d.y()) + dr::sqr(d.z() - 1.f));
+        auto dist = dr::sqrt(dr::square(d.x()) + dr::square(d.y()) + dr::square(d.z() - 1.f));
         return 2.f * dr::safe_asin(.5f * dist);
     }
 
@@ -297,7 +296,7 @@ public:
             cos_theta_m
         );
 
-        Float jacobian = dr::maximum(2.f * dr::sqr(dr::Pi<Float>) * u_m.x() *
+        Float jacobian = dr::maximum(2.f * dr::square(dr::Pi<Float>) * u_m.x() *
                                     sin_theta_m, 1e-6f) * 4.f * dr::dot(wi, m);
 
         bs.wo = dr::fmsub(m, 2.f * dr::dot(m, wi), wi);
@@ -325,7 +324,7 @@ public:
         bs.sampled_component = 0;
 
         UnpolarizedSpectrum spec;
-        for (size_t i = 0; i < dr::array_size_v<UnpolarizedSpectrum>; ++i) {
+        for (size_t i = 0; i < dr::size_v<UnpolarizedSpectrum>; ++i) {
             Float params_spec[3] = { phi_i, theta_i,
                 is_spectral_v<Spectrum> ? si.wavelengths[i] : Float((float) i) };
             spec[i] = m_spectra.eval(sample, params_spec, active);
@@ -384,7 +383,7 @@ public:
         auto [sample, unused] = m_vndf.invert(u_m, params, active);
 
         UnpolarizedSpectrum spec;
-        for (size_t i = 0; i < dr::array_size_v<UnpolarizedSpectrum>; ++i) {
+        for (size_t i = 0; i < dr::size_v<UnpolarizedSpectrum>; ++i) {
             Float params_spec[3] = { phi_i, theta_i,
                 is_spectral_v<Spectrum> ? si.wavelengths[i] : Float((float) i) };
             spec[i] = m_spectra.eval(sample, params_spec, active);
@@ -446,7 +445,7 @@ public:
         #endif
 
         Float jacobian =
-            dr::maximum(2.f * dr::sqr(dr::Pi<Float>) * u_m.x() * Frame3f::sin_theta(m), 1e-6f) * 4.f *
+            dr::maximum(2.f * dr::square(dr::Pi<Float>) * u_m.x() * Frame3f::sin_theta(m), 1e-6f) * 4.f *
             dr::dot(wi, m);
 
         pdf = vndf_pdf * pdf / jacobian;
@@ -471,7 +470,7 @@ public:
     MI_DECLARE_CLASS()
 private:
     template <typename Value> Value u2theta(Value u) const {
-        return dr::sqr(u) * (dr::Pi<Float> / 2.f);
+        return dr::square(u) * (dr::Pi<Float> / 2.f);
     }
 
     template <typename Value> Value u2phi(Value u) const {

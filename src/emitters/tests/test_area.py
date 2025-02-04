@@ -24,7 +24,7 @@ def create_emitter_and_spectrum(s_key='d65'):
         "type": "ply",
         "filename": "resources/data/tests/ply/triangle.ply",
         "emitter" : { "type": "area", "radiance" : spectrum_dicts[s_key] },
-        "to_world" : mi.ScalarTransform4f.translate([10, -1, 2])
+        "to_world" : mi.ScalarTransform4f().translate([10, -1, 2])
     })
     spectrum = mi.load_dict(spectrum_dicts[s_key])
     expanded = spectrum.expand()
@@ -43,7 +43,7 @@ def test01_constructor(variant_scalar_rgb):
     with pytest.raises(RuntimeError):
         e = mi.load_dict({
             "type" : "area",
-            "to_world" : mi.ScalarTransform4f.translate([5, 0, 0])
+            "to_world" : mi.ScalarTransform4f().translate([5, 0, 0])
         })
 
 
@@ -124,3 +124,17 @@ def test04_sample_direction(variants_vec_spectral, spectrum_key):
     assert dr.allclose(res, spec)
 
     assert dr.allclose(emitter.eval_direction(it, ds), spec)
+
+
+def test05_shape_accessors(variants_vec_rgb):
+    shape, _ = create_emitter_and_spectrum()
+    shape_ptr = mi.ShapePtr(shape)
+
+    assert type(shape.emitter()) == mi.Emitter
+    assert type(shape_ptr.emitter()) == mi.EmitterPtr
+
+    emitter = shape.emitter()
+    emitter_ptr = mi.EmitterPtr(emitter)
+
+    assert type(emitter.get_shape()) == mi.Mesh
+    assert type(emitter_ptr.get_shape()) == mi.ShapePtr

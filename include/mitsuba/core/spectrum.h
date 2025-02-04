@@ -245,7 +245,7 @@ Result cie1931_xyz(Float wavelength, dr::mask_t<Float> active = true) {
     active &= wavelength >= (ScalarFloat) MI_CIE_MIN &&
               wavelength <= (ScalarFloat) MI_CIE_MAX;
 
-    UInt32 i0 = dr::clamp(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
+    UInt32 i0 = dr::clip(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
            i1 = i0 + 1;
 
     auto tables = detail::get_color_space_tables<Float32>();
@@ -281,7 +281,7 @@ Float cie1931_y(Float wavelength, dr::mask_t<Float> active = true) {
     active &= wavelength >= (ScalarFloat) MI_CIE_MIN &&
               wavelength <= (ScalarFloat) MI_CIE_MAX;
 
-    UInt32 i0 = dr::clamp(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
+    UInt32 i0 = dr::clip(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
           i1 = i0 + 1;
 
     auto tables = detail::get_color_space_tables<Float32>();
@@ -311,7 +311,7 @@ Float cie_d65(Float wavelength, dr::mask_t<Float> active = true) {
     active &= wavelength >= (ScalarFloat) MI_CIE_MIN &&
               wavelength <= (ScalarFloat) MI_CIE_MAX;
 
-    UInt32 i0 = dr::clamp(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
+    UInt32 i0 = dr::clip(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
            i1 = i0 + 1;
 
     auto tables = detail::get_color_space_tables<Float32>();
@@ -342,7 +342,7 @@ Result linear_rgb_rec(Float wavelength, dr::mask_t<Float> active = true) {
     active &= wavelength >= (ScalarFloat) MI_CIE_MIN &&
               wavelength <= (ScalarFloat) MI_CIE_MAX;
 
-    UInt32 i0 = dr::clamp(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
+    UInt32 i0 = dr::clip(UInt32(t), dr::zeros<UInt32>(), UInt32(MI_CIE_SAMPLES - 2)),
            i1 = i0 + 1;
 
     auto tables = detail::get_color_space_tables<Float32>();
@@ -461,7 +461,7 @@ std::pair<Value, Value> sample_rgb_spectrum(const Value &sample) {
  * cases, the PDF is returned per wavelength.
  */
 template <typename Value> Value pdf_rgb_spectrum(const Value &wavelengths) {
-    Value tmp = dr::sech(0.0072f * (wavelengths - 538.f));
+    Value tmp = dr::rcp(dr::cosh(0.0072f * (wavelengths - 538.f)));
     return dr::select(wavelengths >= MI_CIE_MIN && wavelengths <= MI_CIE_MAX,
                       0.003939804229326285f * tmp * tmp, dr::zeros<Value>());
 }

@@ -62,6 +62,11 @@ template <typename Point_> struct Transform {
         : matrix(value),
           inverse_transpose(inv) { }
 
+    template <typename T,  dr::enable_if_t<!std::is_same_v<T, Point_>> = 0>
+    Transform(const Transform<T> &transform)
+        : matrix(transform.matrix),
+          inverse_transpose(transform.inverse_transpose) { }
+
     /// Concatenate transformations
     MI_INLINE Transform operator*(const Transform &other) const {
         return Transform(matrix * other.matrix,
@@ -70,24 +75,34 @@ template <typename Point_> struct Transform {
 
     /// Compute the inverse of this transformation (involves just shuffles, no arithmetic)
     MI_INLINE Transform inverse() const {
-        return Transform(transpose(inverse_transpose), transpose(matrix));
+        return Transform(dr::transpose(inverse_transpose), dr::transpose(matrix));
+    }
+
+    MI_INLINE Transform transpose() const {
+        return Transform(dr::transpose(matrix), dr::transpose(inverse_transpose));
     }
 
     /// Get the translation part of a matrix
     Vector<Float, Size - 1> translation() const {
-        return dr::head<Size - 1>(matrix.entry(Size - 1));
+        return dr::head<Size - 1>(dr::transpose(matrix).entry(Size - 1));
+    }
+
+    template<typename T>
+    Transform& operator=(const Transform<T> &t) {
+        matrix = t.matrix;
+        inverse_transpose = t.inverse_transpose;
+        return *this;
     }
 
     /// Equality comparison operator
     bool operator==(const Transform &t) const {
-        return matrix == t.matrix &&
-               inverse_transpose == t.inverse_transpose;
+        return dr::all_nested(matrix == t.matrix) && dr::all_nested(inverse_transpose == t.inverse_transpose);
     }
 
     /// Inequality comparison operator
     bool operator!=(const Transform &t) const {
-        return matrix != t.matrix ||
-               inverse_transpose != t.inverse_transpose;
+        return dr::all_nested(matrix != t.matrix) ||
+               dr::all_nested(inverse_transpose != t.inverse_transpose);
     }
 
     /**
@@ -102,10 +117,11 @@ template <typename Point_> struct Transform {
     /// Transform a point (handles affine/non-perspective transformations only)
     template <typename T, typename Expr = dr::expr_t<Float, T>>
     MI_INLINE Point<Expr, Size - 1> transform_affine(const Point<T, Size - 1> &arg) const {
-        dr::Array<Expr, Size> result = matrix.entry(Size - 1);
+        Matrix tr = dr::transpose(matrix);
+        dr::Array<Expr, Size> result = tr.entry(Size - 1);
 
-        DRJIT_UNROLL for (size_t i = 0; i < Size - 1; ++i)
-            result = dr::fmadd(matrix.entry(i), arg.entry(i), result);
+        for (size_t i = 0; i < Size - 1; ++i)
+            result = dr::fmadd(tr.entry(i), arg.entry(i), result);
 
         return dr::head<Size - 1>(result); // no-op
     }
@@ -116,10 +132,11 @@ template <typename Point_> struct Transform {
      */
     template <typename T, typename Expr = dr::expr_t<Float, T>>
     MI_INLINE Point<Expr, Size - 1> operator*(const Point<T, Size - 1> &arg) const {
-        dr::Array<Expr, Size> result = matrix.entry(Size - 1);
+        Matrix tr = dr::transpose(matrix);
+        dr::Array<Expr, Size> result = tr.entry(Size - 1);
 
-        DRJIT_UNROLL for (size_t i = 0; i < Size - 1; ++i)
-            result = dr::fmadd(matrix.entry(i), arg.entry(i), result);
+        for (size_t i = 0; i < Size - 1; ++i)
+            result = dr::fmadd(tr.entry(i), arg.entry(i), result);
 
         return dr::head<Size - 1>(result) / result.entry(Size - 1);
     }
@@ -130,11 +147,12 @@ template <typename Point_> struct Transform {
      */
     template <typename T, typename Expr = dr::expr_t<Float, T>>
     MI_INLINE Vector<Expr, Size - 1> operator*(const Vector<T, Size - 1> &arg) const {
-        dr::Array<Expr, Size> result = matrix.entry(0);
+        Matrix tr = dr::transpose(matrix);
+        dr::Array<Expr, Size> result = tr.entry(0);
         result *= arg.x();
 
-        DRJIT_UNROLL for (size_t i = 1; i < Size - 1; ++i)
-            result = dr::fmadd(matrix.entry(i), arg.entry(i), result);
+        for (size_t i = 1; i < Size - 1; ++i)
+            result = dr::fmadd(tr.entry(i), arg.entry(i), result);
 
         return dr::head<Size - 1>(result); // no-op
     }
@@ -145,11 +163,12 @@ template <typename Point_> struct Transform {
      */
     template <typename T, typename Expr = dr::expr_t<Float, T>>
     MI_INLINE Normal<Expr, Size - 1> operator*(const Normal<T, Size - 1> &arg) const {
-        dr::Array<Expr, Size> result = inverse_transpose.entry(0);
+        Matrix inv = dr::transpose(inverse_transpose);
+        dr::Array<Expr, Size> result = inv.entry(0);
         result *= arg.x();
 
-        DRJIT_UNROLL for (size_t i = 1; i < Size - 1; ++i)
-            result = dr::fmadd(inverse_transpose.entry(i), arg.entry(i), result);
+        for (size_t i = 1; i < Size - 1; ++i)
+            result = dr::fmadd(inv.entry(i), arg.entry(i), result);
 
         return dr::head<Size - 1>(result); // no-op
     }
@@ -173,7 +192,7 @@ template <typename Point_> struct Transform {
     /// Create a translation transformation
     static Transform translate(const Vector<Float, Size - 1> &v) {
         return Transform(dr::translate<Matrix>(v),
-                         transpose(dr::translate<Matrix>(-v)));
+                         dr::transpose(dr::translate<Matrix>(-v)));
     }
 
     /// Create a scale transformation
@@ -229,7 +248,7 @@ template <typename Point_> struct Transform {
         inv_trafo(2, 3) = 1.f;
         inv_trafo(3, 2) = (near_ - far_) / (far_ * near_);
 
-        return Transform(trafo, transpose(inv_trafo));
+        return Transform(trafo, dr::transpose(inv_trafo));
     }
 
     /** \brief Create an orthographic transformation, which maps Z to [0,1]
@@ -262,12 +281,12 @@ template <typename Point_> struct Transform {
         Vector3 new_up = dr::cross(dir, left);
 
         Vector1 z(0);
-        Matrix result = Matrix(
+        Matrix result = dr::transpose(Matrix(
             dr::concat(left, z),
             dr::concat(new_up, z),
             dr::concat(dir, z),
             dr::concat(origin, Vector1(1))
-        );
+        ));
 
         Matrix inverse = dr::transpose(Matrix(
             dr::concat(left, z),
@@ -276,20 +295,20 @@ template <typename Point_> struct Transform {
             Vector<Float, 4>(0.f, 0.f, 0.f, 1.f)
         ));
 
-        inverse[3] = inverse * dr::concat(-origin, Vector1(1));
+        inverse[3] = dr::transpose(inverse) * dr::concat(-origin, Vector1(1));
 
-        return Transform(result, dr::transpose(inverse));
+        return Transform(result, inverse);
     }
 
     /// Creates a transformation that converts from the standard basis to 'frame'
     template <typename Value, size_t N = Size, dr::enable_if_t<N == 4> = 0>
     static Transform to_frame(const Frame<Value> &frame) {
         dr::Array<Scalar, 1> z(0);
-        Matrix result = Matrix(
+        Matrix result = dr::transpose(Matrix(
             dr::concat(frame.s, z),
             dr::concat(frame.t, z),
             dr::concat(frame.n, z),
-            Vector<Float, 4>(0.f, 0.f, 0.f, 1.f)
+            Vector<Float, 4>(0.f, 0.f, 0.f, 1.f))
         );
 
         return Transform(result, result);
@@ -299,12 +318,12 @@ template <typename Point_> struct Transform {
     template <typename Value, size_t N = Size, dr::enable_if_t<N == 4> = 0>
     static Transform from_frame(const Frame<Value> &frame) {
         dr::Array<Scalar, 1> z(0);
-        Matrix result = dr::transpose(Matrix(
+        Matrix result = Matrix(
             dr::concat(frame.s, z),
             dr::concat(frame.t, z),
             dr::concat(frame.n, z),
             Vector<Float, 4>(0.f, 0.f, 0.f, 1.f)
-        ));
+        );
 
         return Transform(result, result);
     }
@@ -343,14 +362,14 @@ template <typename Point_> struct Transform {
         Result result;
         for (size_t i = 0; i < ExtractedSize - 1; ++i) {
             for (size_t j = 0; j < ExtractedSize - 1; ++j) {
-                result.matrix.entry(i, j) = matrix.entry(i, j);
-                result.inverse_transpose.entry(i, j) =
-                    inverse_transpose.entry(i, j);
+                result.matrix.entry(j, i) = matrix.entry(j, i);
+                result.inverse_transpose.entry(j, i) =
+                    inverse_transpose.entry(j, i);
             }
-            result.matrix.entry(ExtractedSize - 1, i) =
-                matrix.entry(Size - 1, i);
-            result.inverse_transpose.entry(i, ExtractedSize - 1) =
-                inverse_transpose.entry(i, Size - 1);
+            result.matrix.entry(i, ExtractedSize - 1) =
+                matrix.entry(i, Size - 1);
+            result.inverse_transpose.entry(ExtractedSize - 1, i) =
+                inverse_transpose.entry(Size - 1, i);
         }
 
         result.matrix.entry(ExtractedSize - 1, ExtractedSize - 1) =

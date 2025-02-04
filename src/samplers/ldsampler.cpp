@@ -86,13 +86,13 @@ public:
     void set_sample_count(uint32_t spp) override {
         // Make sure sample_count is power of two and square (e.g. 4, 16, 64, 256, 1024, ...)
         ScalarUInt32 res = 2;
-        while (dr::sqr(res) < spp)
+        while (dr::square(res) < spp)
             res = math::round_to_power_of_two(++res);
 
-        if (spp != dr::sqr(res))
-            Log(Warn, "Sample count should be square and power of two, rounding to %i", dr::sqr(res));
+        if (spp != dr::square(res))
+            Log(Warn, "Sample count should be square and power of two, rounding to %i", dr::square(res));
 
-        m_sample_count = dr::sqr(res);
+        m_sample_count = dr::square(res);
     }
 
     ref<Sampler<Float, Spectrum>> fork() override {
@@ -107,7 +107,7 @@ public:
         return new LowDiscrepancySampler (*this);
     }
 
-    void seed(uint32_t seed, uint32_t wavefront_size) override {
+    void seed(UInt32 seed, uint32_t wavefront_size) override {
         Base::seed(seed, wavefront_size);
         m_scramble_seed = compute_per_sequence_seed(seed);
     }
@@ -149,6 +149,16 @@ public:
     void schedule_state() override {
         Base::schedule_state();
         dr::schedule(m_scramble_seed);
+    }
+
+    void traverse_1_cb_ro(void *payload, void (*fn)(void *, uint64_t)) const override {
+        auto fields = dr::make_tuple(m_scramble_seed, m_dimension_index);
+        dr::traverse_1_fn_ro(fields, payload, fn);
+    }
+
+    void traverse_1_cb_rw(void *payload, uint64_t (*fn)(void *, uint64_t)) override {
+        auto fields = dr::tie(m_scramble_seed, m_dimension_index);
+        dr::traverse_1_fn_rw(fields, payload, fn);
     }
 
     std::string to_string() const override {

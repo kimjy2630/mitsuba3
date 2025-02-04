@@ -31,10 +31,8 @@ MI_VARIANT Mesh<Float, Spectrum>::Mesh(const Properties &props) : Base(props) {
     m_flip_normals = props.get<bool>("flip_normals", false);
 
     m_discontinuity_types = (uint32_t) DiscontinuityFlags::PerimeterType;
-    dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
 
     m_shape_type = ShapeType::Mesh;
-    dr::set_attr(this, "shape_type", m_shape_type);
 }
 
 MI_VARIANT
@@ -52,8 +50,6 @@ Mesh<Float, Spectrum>::Mesh(const std::string &name, ScalarSize vertex_count,
         m_vertex_normals = dr::zeros<FloatStorage>(m_vertex_count * 3);
     if (has_vertex_texcoords)
         m_vertex_texcoords = dr::zeros<FloatStorage>(m_vertex_count * 2);
-
-    initialize();
 }
 
 MI_VARIANT
@@ -89,8 +85,6 @@ MI_VARIANT void Mesh<Float, Spectrum>::traverse(TraversalCallback *callback) {
     // We arbitrarily chose to show all attributes as being differentiable here.
     for (auto &[name, attribute]: m_mesh_attributes)
         callback->put_parameter(name, attribute.buf, +ParamFlags::Differentiable);
-
-
 }
 
 MI_VARIANT void Mesh<Float, Spectrum>::parameters_changed(const std::vector<std::string> &keys) {
@@ -99,12 +93,12 @@ MI_VARIANT void Mesh<Float, Spectrum>::parameters_changed(const std::vector<std:
     if (m_vertex_positions.size() != m_vertex_count * 3) {
         Log(Debug, "parameters_changed(): Vertex count changed, updating it.");
         mesh_attributes_changed = true;
-        m_vertex_count = m_vertex_positions.size() / 3;
+        m_vertex_count = (uint32_t) m_vertex_positions.size() / 3;
     }
     if (m_faces.size() != m_face_count * 3) {
         Log(Debug, "parameters_changed(): Face count changed, updating it.");
         mesh_attributes_changed = true;
-        m_face_count = m_faces.size() / 3;
+        m_face_count = (uint32_t) m_faces.size() / 3;
     }
     if (has_vertex_normals() && m_vertex_normals.size() != m_vertex_count * 3) {
         Log(Debug, "parameters_changed(): Vertex normal count changed, updating it.");
@@ -157,6 +151,9 @@ MI_VARIANT void Mesh<Float, Spectrum>::parameters_changed(const std::vector<std:
         m_faces_ptr = m_faces.data();
 #endif
         mark_dirty();
+
+        if (!m_initialized)
+            Base::initialize();
     }
 
     Base::parameters_changed();
@@ -392,6 +389,7 @@ MI_VARIANT void Mesh<Float, Spectrum>::recompute_vertex_normals() {
             Float face_angle = dr::safe_acos(dr::dot(d0, d1));
 
             Vector3f nn = n * face_angle;
+
             for (int j = 0; j < 3; ++j)
                 dr::scatter_reduce(ReduceOp::Add, normals[j], nn[j], fi[i]);
         }
@@ -400,15 +398,18 @@ MI_VARIANT void Mesh<Float, Spectrum>::recompute_vertex_normals() {
 
         normals = dr::normalize(normals);
 
+        // Convert to 32-bit precision
+        using JitInputNormal3f = Normal<dr::replace_scalar_t<Float, InputFloat>, 3>;
+        JitInputNormal3f input_normals(normals);
+
         // Disconnect the vertex normal buffer from any pre-existing AD
         // graph. Otherwise an AD graph might be unnecessarily retained
         // here, despite the following lines re-initializing the normals.
         dr::disable_grad(m_vertex_normals);
 
         UInt32 ni = dr::arange<UInt32>(m_vertex_count) * 3;
-        for (size_t i = 0; i < 3; ++i)
-            dr::scatter(m_vertex_normals,
-                        dr::float32_array_t<Float>(normals[i]), ni + i);
+        for (uint32_t i = 0; i < 3; ++i)
+            dr::scatter(m_vertex_normals, input_normals[i], ni + i);
 
         dr::eval(m_vertex_normals);
     }
@@ -429,6 +430,7 @@ MI_VARIANT void Mesh<Float, Spectrum>::recompute_bbox() {
 
 MI_VARIANT void Mesh<Float, Spectrum>::build_pmf() {
     std::lock_guard<std::mutex> lock(m_mutex);
+    dr::scoped_symbolic_independence<Float> guard{};
 
     if (m_face_count == 0)
         Throw("Cannot create sampling table for an empty mesh: %s", to_string());
@@ -579,8 +581,8 @@ MI_VARIANT void Mesh<Float, Spectrum>::build_directed_edges() {
 template <typename Index>
 MI_INLINE auto pick_vertex(const dr::Array<dr::uint32_array_t<Index>, 3> &vec, const Index &offset) {
     Index dim_mod = dr::imod(offset, 3u);
-    Index res = dr::select(dr::eq(dim_mod, 1u), vec[1], vec[0]);
-    res = dr::select(dr::eq(dim_mod, 2u), vec[2], res);
+    Index res = dr::select(dim_mod == 1u, vec[1], vec[0]);
+    res = dr::select(dim_mod == 2u, vec[2], res);
     return res;
 }
 
@@ -588,7 +590,7 @@ MI_VARIANT void
 Mesh<Float, Spectrum>::build_indirect_silhouette_distribution() {
     UInt32 dedge = dr::arange<UInt32>(m_face_count * 3),
            dedge_oppo = opposite_dedge(dedge);
-    Mask boundary = dr::eq(dedge_oppo, m_invalid_dedge);
+    Mask boundary = (dedge_oppo == m_invalid_dedge);
     // One edge can be represented by two dedge indices, we use the smaller index
     Mask valid = (dedge_oppo > dedge) & !boundary;
 
@@ -858,7 +860,7 @@ Mesh<Float, Spectrum>::sample_silhouette(const Point3f &sample_,
     std::tie(dedge, sample_x, pmf_edge) =
         m_sil_dedge_pmf.sample_reuse_pmf(sample_.x(), active);
     Point3f sample(sample_x, sample_.y(), sample_.z());
-    active &= dr::neq(pmf_edge, 0.f);
+    active &= (pmf_edge != 0.f);
 
     auto [face_idx, edge_idx] = dr::idivmod(dedge, 3u);
     Vector3u v_idx = face_indices(face_idx, active);
@@ -869,10 +871,10 @@ Mesh<Float, Spectrum>::sample_silhouette(const Point3f &sample_,
     ss.p = dr::lerp(p0, p1, sample.x());
 
     // Face local barycentric UV coordinates
-    ss.uv = dr::select(dr::eq(edge_idx, 0u),
+    ss.uv = dr::select(edge_idx == 0u,
                        Point2f(sample.x(), 0.f),
                        Point2f(1 - sample.x(), sample.x()));
-    ss.uv = dr::select(dr::eq(edge_idx, 2u),
+    ss.uv = dr::select(edge_idx == 2u,
                        Point2f(0.f, 1 - sample.x()),
                        ss.uv);
 
@@ -881,7 +883,7 @@ Mesh<Float, Spectrum>::sample_silhouette(const Point3f &sample_,
 
     UInt32 dedge_oppo = opposite_dedge(dedge, active);
     UInt32 face_idx_oppo = dr::idiv(dedge_oppo, 3u);
-    Mask has_opposite = dr::neq(dedge_oppo, m_invalid_dedge) & active;
+    Mask has_opposite = (dedge_oppo != m_invalid_dedge) & active;
     Normal3f n_oppo = face_normal(face_idx_oppo, has_opposite);
 
     bool is_lune = has_flag(flags, DiscontinuityFlags::DirectionLune);
@@ -934,7 +936,7 @@ Mesh<Float, Spectrum>::sample_silhouette(const Point3f &sample_,
     ss.offset = 0.f;
 
     // Mark failed samples
-    Mask failed = dr::eq(ss.pdf, 0.f) || !active;
+    Mask failed = (ss.pdf == 0.f) || !active;
     dr::masked(ss, failed) = dr::zeros<SilhouetteSample3f>();
 
     return ss;
@@ -949,8 +951,8 @@ Mesh<Float, Spectrum>::invert_silhouette_sample(const SilhouetteSample3f &ss,
 
     // Safley ignore invalid boundary segments
     Mask active =
-        active_ && (dr::eq(ss.discontinuity_type,
-                           (uint32_t) DiscontinuityFlags::PerimeterType));
+        active_ && (ss.discontinuity_type ==
+                           (uint32_t) DiscontinuityFlags::PerimeterType);
 
     UInt32 dedge_curr = ss.prim_index * 3u + ss.projection_index,
            dedge_oppo = opposite_dedge(dedge_curr, active);
@@ -961,7 +963,7 @@ Mesh<Float, Spectrum>::invert_silhouette_sample(const SilhouetteSample3f &ss,
     dr::masked(dedge_curr, swap) = dedge_oppo;
     dr::masked(dedge_oppo, swap) = dedge_curr_tmp;
 
-    Mask has_opposite = dr::neq(dedge_oppo, m_invalid_dedge) && active;
+    Mask has_opposite = (dedge_oppo != m_invalid_dedge) && active;
     Normal3f n_curr = face_normal(dr::idiv(dedge_curr, 3u), active),
              n_oppo = face_normal(dr::idiv(dedge_oppo, 3u), has_opposite);
 
@@ -979,7 +981,7 @@ Mesh<Float, Spectrum>::invert_silhouette_sample(const SilhouetteSample3f &ss,
     Float alpha = dr::norm(ss.p - p0) * dr::rcp(dr::norm(p1 - p0));
 
     // We sacrifice the last bit of precision to avoid numerical issues
-    alpha = dr::clamp(alpha, dr::Epsilon<Float>, 1.f - dr::Epsilon<Float>);
+    alpha = dr::clip(alpha, dr::Epsilon<Float>, 1.f - dr::Epsilon<Float>);
 
     dr::masked(sample.x(), active) =
         (cdf + (alpha - 1.f) * pmf) * m_sil_dedge_pmf.normalization();
@@ -1047,7 +1049,9 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
     the nearest edge, instead we randomly sample a point on any silhouette edge.
     This ensures that the triangle corners do not receive minimal samples. */
 
-    if (dr::width(m_E2E) == 0) // Shape is not being differentiated
+    // Directed edge data structure was not prepared,
+    // e.g. due to the shape not being differentiated.
+    if (dr::width(m_E2E) == 0)
         return dr::zeros<SilhouetteSample3f>();
 
     Vector3u fi = face_indices(si.prim_index, active);
@@ -1058,9 +1062,9 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
     UInt32 dedge_oppo_0 = opposite_dedge(si.prim_index * 3u     , active),
            dedge_oppo_1 = opposite_dedge(si.prim_index * 3u + 1u, active),
            dedge_oppo_2 = opposite_dedge(si.prim_index * 3u + 2u, active);
-    Mask boundary_0 = active && dr::eq(dedge_oppo_0, m_invalid_dedge),
-         boundary_1 = active && dr::eq(dedge_oppo_1, m_invalid_dedge),
-         boundary_2 = active && dr::eq(dedge_oppo_2, m_invalid_dedge);
+    Mask boundary_0 = active && (dedge_oppo_0 == m_invalid_dedge),
+         boundary_1 = active && (dedge_oppo_1 == m_invalid_dedge),
+         boundary_2 = active && (dedge_oppo_2 == m_invalid_dedge);
     UInt32 prim_idx_0 = dr::select(boundary_0, si.prim_index, dr::idiv(dedge_oppo_0, 3u)),
            prim_idx_1 = dr::select(boundary_1, si.prim_index, dr::idiv(dedge_oppo_1, 3u)),
            prim_idx_2 = dr::select(boundary_2, si.prim_index, dr::idiv(dedge_oppo_2, 3u));
@@ -1104,7 +1108,7 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
         weight[2] = dr::select(cos_theta_oppo[2] <= 0.f, max_weight, weight[2]);
 
         // In case the weights are too small
-        Float min_weight = dr::deg_to_rad(1);
+        Float min_weight = dr::deg_to_rad(1.f);
         weight[0] = dr::maximum(weight[0], min_weight);
         weight[1] = dr::maximum(weight[1], min_weight);
         weight[2] = dr::maximum(weight[2], min_weight);
@@ -1118,9 +1122,9 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
         ss.prim_index = dr::select(sample >= weight[0], prim_idx_1, prim_idx_0);
         ss.prim_index = dr::select(sample >= weight[0] + weight[1], prim_idx_2, ss.prim_index);
 
-        failed_proj = (dr::eq(ss.projection_index, 0u) && cos_theta_oppo[0] > 0.f) ||
-                      (dr::eq(ss.projection_index, 1u) && cos_theta_oppo[1] > 0.f) ||
-                      (dr::eq(ss.projection_index, 2u) && cos_theta_oppo[2] > 0.f);
+        failed_proj = ((ss.projection_index == 0u) && (cos_theta_oppo[0] > 0.f)) ||
+                      ((ss.projection_index == 1u) && (cos_theta_oppo[1] > 0.f)) ||
+                      ((ss.projection_index == 2u) && (cos_theta_oppo[2] > 0.f));
     } else {
         /// Project to any silhouette edge with equal probability.
         weight.x() = dr::select(cos_theta_oppo.x() < 0.f, 1.f, 0.f);
@@ -1130,7 +1134,7 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
         Float sum = weight[0] + weight[1] + weight[2];
 
         // If none of the edges are on the silhouette, pick one uniformly
-        failed_proj = dr::eq(sum, 0.f);
+        failed_proj = (sum == 0.f);
         dr::masked(weight, failed_proj) = Vector3f(1.f, 1.f, 1.f);
         dr::masked(sum, failed_proj) = 3.f;
         weight /= sum;
@@ -1143,25 +1147,25 @@ Mesh<Float, Spectrum>::primitive_silhouette_projection(const Point3f &viewpoint,
 
     // Reuse sample
     sample = dr::select(
-        dr::eq(ss.projection_index, 0u),
+        ss.projection_index == 0u,
         sample / weight[0],
         sample);
     sample = dr::select(
-        dr::eq(ss.projection_index, 1u),
+        ss.projection_index == 1u,
         (sample - weight[0]) / weight[1],
         sample);
     sample = dr::select(
-        dr::eq(ss.projection_index, 2u),
+        ss.projection_index == 2u,
         (sample - weight[1] - weight[0]) / weight[2],
         sample);
 
     // Sample a point on the selected edge
     ss.p = dr::select(
-        dr::eq(ss.projection_index, 1u),
+        ss.projection_index == 1u,
         dr::lerp(p1, p2, sample), dr::lerp(p0, p1, sample)
     );
     ss.p = dr::select(
-        dr::eq(ss.projection_index, 2u),
+        ss.projection_index == 2u,
         dr::lerp(p2, p0, sample), ss.p
     );
 
@@ -1278,7 +1282,7 @@ Mesh<Float, Spectrum>::precompute_silhouette(
         Float weight = unit_angle(to_p0, to_p1);
 
         UInt32 dedge_oppo = opposite_dedge(dedge_curr);
-        Mask has_opposite = dr::neq(dedge_oppo, m_invalid_dedge);
+        Mask has_opposite = (dedge_oppo != m_invalid_dedge);
 
         auto face_idx_oppo = dr::idiv(dedge_oppo, 3u);
         Normal3f n_oppo = face_normal(face_idx_oppo, has_opposite);
@@ -1327,10 +1331,10 @@ Mesh<Float, Spectrum>::sample_precomputed_silhouette(const Point3f &viewpoint,
     dr::masked(ss.n, dr::dot(ss.n, inward_dir) > 0.f) *= -1.f;
 
     // Face local barycentric UV coordinates used by `differential_motion`
-    ss.uv = dr::select(dr::eq(e, 0u),
+    ss.uv = dr::select(e == 0u,
                        Point2f(sample2, 0.f),
                        Point2f(1 - sample2, sample2));
-    ss.uv = dr::select(dr::eq(e, 2u),
+    ss.uv = dr::select(e == 2u,
                        Point2f(0.f, 1 - sample2),
                        ss.uv);
 
@@ -1485,7 +1489,7 @@ Mesh<Float, Spectrum>::compute_surface_interaction(const Ray3f &ray,
             Float det     = dr::fmsub(duv0.x(), duv1.y(), duv0.y() * duv1.x()),
                   inv_det = dr::rcp(det);
 
-            Mask valid = dr::neq(det, 0.f);
+            Mask valid = (det != 0.f);
 
             si.dp_du[valid] = dr::fmsub( duv1.y(), dp0, duv0.y() * dp1) * inv_det;
             si.dp_dv[valid] = dr::fnmadd(duv1.x(), dp0, duv0.x() * dp1) * inv_det;
@@ -1851,13 +1855,7 @@ MI_VARIANT void Mesh<Float, Spectrum>::optix_build_input(OptixBuildInput &build_
 #endif
 
 MI_VARIANT bool Mesh<Float, Spectrum>::parameters_grad_enabled() const {
-    bool result = false;
-    for (auto &[name, attribute]: m_mesh_attributes)
-        result |= dr::grad_enabled(attribute.buf);
-    result |= dr::grad_enabled(m_vertex_positions);
-    result |= dr::grad_enabled(m_vertex_normals);
-    result |= dr::grad_enabled(m_vertex_texcoords);
-    return result;
+    return dr::grad_enabled(m_vertex_positions);
 }
 
 MI_IMPLEMENT_CLASS_VARIANT(Mesh, Shape)

@@ -112,7 +112,8 @@ Scene<Float, Spectrum>::accel_init_cpu(const Properties &props) {
 
     s.accel = rtcNewScene(embree_device);
     rtcSetSceneBuildQuality(s.accel, RTC_BUILD_QUALITY_HIGH);
-    rtcSetSceneFlags(s.accel, RTC_SCENE_FLAG_NONE);
+    bool use_robust = props.get<bool>("embree_use_robust_intersections", false);
+    rtcSetSceneFlags(s.accel, use_robust ? RTC_SCENE_FLAG_ROBUST : RTC_SCENE_FLAG_NONE);
 
     ScopedPhase phase(ProfilerPhase::InitAccel);
     accel_parameters_changed_cpu();
@@ -125,7 +126,7 @@ Scene<Float, Spectrum>::accel_init_cpu(const Properties &props) {
         if (!m_shapes.empty()) {
             std::unique_ptr<uint32_t[]> data(new uint32_t[m_shapes.size()]);
             for (size_t i = 0; i < m_shapes.size(); i++)
-                data[i] = jit_registry_get_id(JitBackend::LLVM, m_shapes[i]);
+                data[i] = jit_registry_id(m_shapes[i]);
             s.shapes_registry_ids
                 = dr::load<DynamicBuffer<UInt32>>(data.get(), m_shapes.size());
         } else {
@@ -180,18 +181,21 @@ MI_VARIANT void Scene<Float, Spectrum>::accel_parameters_changed_cpu() {
             m_accel_handle.index(),
             [](uint32_t /* index */, int free, void *payload) {
                 if (free) {
-                    // Ensure all ray tracing kernels are terminated before 
-                    // releasing the scene
-                    // This is needed in the scenario where we record a
-                    // ray-tracing operation, the scene is destroyed, and we
-                    // only trigger an evaluation afterwards
-                    if constexpr (dr::is_llvm_v<Float>)
-                        dr::sync_thread();
+                    // Enqueue delayed function to ensure all ray tracing
+                    // kernels are terminated before releasing the scene. This
+                    // is needed in the scenario where we record a ray-tracing
+                    // operation, the scene is destroyed, and we only trigger an
+                    // evaluation afterwards.
 
-                    Log(Debug, "Free Embree scene state..");
-                    EmbreeState<Float> *s = (EmbreeState<Float> *) payload;
-                    rtcReleaseScene(s->accel);
-                    delete s;
+                    jit_enqueue_host_func(
+                        JitBackend::LLVM,
+                        [](void *p) {
+                            EmbreeState<Float> *s = (EmbreeState<Float> *) p;
+                            rtcReleaseScene(s->accel);
+                            delete s;
+                        },
+                        payload
+                    );
                 }
             },
             (void *) m_accel
@@ -325,12 +329,12 @@ Scene<Float, Spectrum>::ray_intersect_preliminary_cpu(const Ray3f &ray,
 
         UInt32 inst_index = UInt32::steal(out[5]);
 
-        Mask hit = active && dr::neq(t, ray_maxt);
+        Mask hit = active && (t != ray_maxt);
 
         pi.t = dr::select(hit, t, dr::Infinity<Float>);
 
         // Set si.instance and si.shape
-        Mask hit_inst = hit && dr::neq(inst_index, RTC_INVALID_GEOMETRY_ID);
+        Mask hit_inst = hit && (inst_index != RTC_INVALID_GEOMETRY_ID);
         UInt32 index = dr::select(hit_inst, inst_index, pi.shape_index);
 
         ShapePtr shape = dr::gather<UInt32>(s.shapes_registry_ids, index, hit);
@@ -431,7 +435,7 @@ Scene<Float, Spectrum>::ray_test_cpu(const Ray3f &ray, Mask coherent, Mask activ
 
         jit_llvm_ray_trace(func_v.index(), scene_v.index(), 1, in, out);
 
-        return active && dr::neq(Single::steal(out[0]), ray_maxt);
+        return active && (Single::steal(out[0]) != ray_maxt);
     } else {
         DRJIT_MARK_USED(ray);
         DRJIT_MARK_USED(coherent);

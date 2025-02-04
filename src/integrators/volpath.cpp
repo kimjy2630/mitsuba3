@@ -1,5 +1,4 @@
 #include <random>
-#include <tuple>
 #include <mitsuba/core/ray.h>
 #include <mitsuba/core/properties.h>
 #include <mitsuba/render/bsdf.h>
@@ -84,8 +83,8 @@ public:
     Float index_spectrum(const UnpolarizedSpectrum &spec, const UInt32 &idx) const {
         Float m = spec[0];
         if constexpr (is_rgb_v<Spectrum>) { // Handle RGB rendering
-            dr::masked(m, dr::eq(idx, 1u)) = spec[1];
-            dr::masked(m, dr::eq(idx, 2u)) = spec[2];
+            dr::masked(m, idx == 1u) = spec[1];
+            dr::masked(m, idx == 2u) = spec[2];
         } else {
             DRJIT_MARK_USED(idx);
         }
@@ -102,7 +101,7 @@ public:
 
         // If there is an environment emitter and emitters are visible: all rays will be valid
         // Otherwise, it will depend on whether a valid interaction is sampled
-        Mask valid_ray = !m_hide_emitters && dr::neq(scene->environment(), nullptr);
+        Mask valid_ray = !m_hide_emitters && (scene->environment() != nullptr);
 
         // For now, don't use ray differentials
         Ray3f ray = ray_;
@@ -118,7 +117,7 @@ public:
 
         UInt32 channel = 0;
         if (is_rgb_v<Spectrum>) {
-            uint32_t n_channels = (uint32_t) dr::array_size_v<Spectrum>;
+            uint32_t n_channels = (uint32_t) dr::size_v<Spectrum>;
             channel = (UInt32) dr::minimum(sampler->next_1d(active) * n_channels, n_channels - 1);
         }
 
@@ -130,29 +129,81 @@ public:
         /* Set up a Dr.Jit loop (optimizes away to a normal loop in scalar mode,
            generates wavefront or megakernel renderer based on configuration).
            Register everything that changes as part of the loop here */
-        dr::Loop<Mask> loop("Volpath integrator",
-                            /* loop state: */ active, depth, ray, throughput,
-                            result, si, mei, medium, eta, last_scatter_event,
-                            last_scatter_direction_pdf, needs_intersection,
-                            specular_chain, valid_ray, sampler);
+        struct LoopState {
+            Mask active;
+            UInt32 depth;
+            Ray3f ray;
+            Spectrum throughput;
+            Spectrum result;
+            SurfaceInteraction3f si;
+            MediumInteraction3f mei;
+            MediumPtr medium;
+            Float eta;
+            Interaction3f last_scatter_event;
+            Float last_scatter_direction_pdf;
+            Mask needs_intersection;
+            Mask specular_chain;
+            Mask valid_ray;
+            Sampler* sampler;
 
-        while (loop(active)) {
+            DRJIT_STRUCT(LoopState, active, depth, ray, throughput, result, \
+                si, mei, medium, eta, last_scatter_event, \
+                last_scatter_direction_pdf, needs_intersection, \
+                specular_chain, valid_ray, sampler)
+        } ls = {
+            active,
+            depth,
+            ray,
+            throughput,
+            result,
+            si,
+            mei,
+            medium,
+            eta,
+            last_scatter_event,
+            last_scatter_direction_pdf,
+            needs_intersection,
+            specular_chain,
+            valid_ray,
+            sampler
+        };
+
+        dr::tie(ls) = dr::while_loop(dr::make_tuple(ls),
+            [](const LoopState& ls) { return ls.active; },
+            [this, scene, channel](LoopState& ls) {
+
+            Mask& active = ls.active;
+            UInt32& depth = ls.depth;
+            Ray3f& ray = ls.ray;
+            Spectrum& throughput = ls.throughput;
+            Spectrum& result = ls.result;
+            SurfaceInteraction3f& si = ls.si;
+            MediumInteraction3f& mei = ls.mei;
+            MediumPtr& medium = ls.medium;
+            Float& eta = ls.eta;
+            Interaction3f& last_scatter_event = ls.last_scatter_event;
+            Float& last_scatter_direction_pdf = ls.last_scatter_direction_pdf;
+            Mask& needs_intersection = ls.needs_intersection;
+            Mask& specular_chain = ls.specular_chain;
+            Mask& valid_ray = ls.valid_ray;
+            Sampler* sampler = ls.sampler;
+
             // ----------------- Handle termination of paths ------------------
             // Russian roulette: try to keep path weights equal to one, while accounting for the
             // solid angle compression at refractive index boundaries. Stop with at least some
             // probability to avoid  getting stuck (e.g. due to total internal reflection)
-            active &= dr::any(dr::neq(unpolarized_spectrum(throughput), 0.f));
-            Float q = dr::minimum(dr::max(unpolarized_spectrum(throughput)) * dr::sqr(eta), .95f);
+            active &= dr::any(unpolarized_spectrum(throughput) != 0.f);
+            Float q = dr::minimum(dr::max(unpolarized_spectrum(throughput)) * dr::square(eta), .95f);
             Mask perform_rr = (depth > (uint32_t) m_rr_depth);
             active &= sampler->next_1d(active) < q || !perform_rr;
             dr::masked(throughput, perform_rr) *= dr::rcp(dr::detach(q));
 
             active &= depth < (uint32_t) m_max_depth;
             if (dr::none_or<false>(active))
-                break;
+                return;
 
             // ----------------------- Sampling the RTE -----------------------
-            Mask active_medium  = active && dr::neq(medium, nullptr);
+            Mask active_medium  = active && (medium != nullptr);
             Mask active_surface = active && !active_medium;
             Mask act_null_scatter = false, act_medium_scatter = false,
                  escaped_medium = false;
@@ -254,11 +305,11 @@ public:
 
             if (dr::any_or<true>(active_surface)) {
                 // ---------------- Intersection with emitters ----------------
-                Mask ray_from_camera = active_surface && dr::eq(depth, 0u);
+                Mask ray_from_camera = active_surface && (depth == 0u);
                 Mask count_direct = ray_from_camera || specular_chain;
                 EmitterPtr emitter = si.emitter(scene);
-                Mask active_e = active_surface && dr::neq(emitter, nullptr)
-                                && !(dr::eq(depth, 0u) && m_hide_emitters);
+                Mask active_e = active_surface && emitter != nullptr
+                                && !((depth == 0u) && m_hide_emitters);
                 if (dr::any_or<true>(active_e)) {
                     Float emitter_pdf = 1.0f;
                     if (dr::any_or<true>(active_e && !count_direct)) {
@@ -320,8 +371,10 @@ public:
                 dr::masked(medium, has_medium_trans) = si.target_medium(ray.d);
             }
             active &= (active_surface | active_medium);
-        }
-        return { result, valid_ray };
+        },
+        "Volpath integrator");
+
+        return { ls.result, ls.valid_ray };
     }
 
 
@@ -334,8 +387,8 @@ public:
         Spectrum transmittance(1.0f);
 
         auto [ds, emitter_val] = scene->sample_emitter_direction(ref_interaction, sampler->next_2d(active), false, active);
-        dr::masked(emitter_val, dr::eq(ds.pdf, 0.f)) = 0.f;
-        active &= dr::neq(ds.pdf, 0.f);
+        dr::masked(emitter_val, ds.pdf == 0.f) = 0.f;
+        active &= (ds.pdf != 0.f);
 
         if (dr::none_or<false>(active)) {
             return { emitter_val, ds };
@@ -352,21 +405,56 @@ public:
         Float total_dist = 0.f;
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
         Mask needs_intersection = true;
+        DirectionSample3f dir_sample = ds;
 
-        dr::Loop<Mask> loop("Volpath integrator emitter sampling");
-        loop.put(active, ray, total_dist, needs_intersection, medium, si,
-                 transmittance);
-        sampler->loop_put(loop);
-        loop.init();
-        while (loop(dr::detach(active))) {
+        struct LoopState {
+            Mask active;
+            Ray3f ray;
+            Float total_dist;
+            Mask needs_intersection;
+            MediumPtr medium;
+            SurfaceInteraction3f si;
+            Spectrum transmittance;
+            DirectionSample3f dir_sample;
+            Sampler* sampler;
+
+            DRJIT_STRUCT(LoopState, active, ray, total_dist, \
+                needs_intersection, medium, si, transmittance, \
+                dir_sample, sampler)
+        } ls = {
+            active,
+            ray,
+            total_dist,
+            needs_intersection,
+            medium,
+            si,
+            transmittance,
+            dir_sample,
+            sampler
+        };
+
+        dr::tie(ls) = dr::while_loop(dr::make_tuple(ls),
+            [](const LoopState& ls) { return dr::detach(ls.active); },
+            [this, scene, channel, max_dist](LoopState& ls) {
+
+            Mask& active = ls.active;
+            Ray3f& ray = ls.ray;
+            Float& total_dist = ls.total_dist;
+            Mask& needs_intersection = ls.needs_intersection;
+            MediumPtr& medium = ls.medium;
+            SurfaceInteraction3f& si = ls.si;
+            Spectrum& transmittance = ls.transmittance;
+            DirectionSample3f& dir_sample = ls.dir_sample;
+            Sampler* sampler = ls.sampler;
+
             Float remaining_dist = max_dist - total_dist;
             ray.maxt = remaining_dist;
             active &= remaining_dist > 0.f;
             if (dr::none_or<false>(active))
-                break;
+                return;
 
             Mask escaped_medium = false;
-            Mask active_medium  = active && dr::neq(medium, nullptr);
+            Mask active_medium  = active && (medium != nullptr);
             Mask active_surface = active && !active_medium;
 
             if (dr::any_or<true>(active_medium)) {
@@ -390,7 +478,7 @@ public:
                 }
 
                 // Handle exceeding the maximum distance by medium sampling
-                dr::masked(total_dist, active_medium && (mei.t > remaining_dist) && mei.is_valid()) = ds.dist;
+                dr::masked(total_dist, active_medium && (mei.t > remaining_dist) && mei.is_valid()) = dir_sample.dist;
                 dr::masked(mei.t, active_medium && (mei.t > remaining_dist)) = dr::Infinity<Float>;
 
                 escaped_medium = active_medium && !mei.is_valid();
@@ -433,15 +521,18 @@ public:
             needs_intersection |= active_surface;
 
             // Continue tracing through scene if non-zero weights exist
-            active &= (active_medium || active_surface) && dr::any(dr::neq(unpolarized_spectrum(transmittance), 0.f));
+            active &= (active_medium || active_surface) &&
+                      dr::any(unpolarized_spectrum(transmittance) != 0.f);
 
             // If a medium transition is taking place: Update the medium pointer
             Mask has_medium_trans = active_surface && si.is_medium_transition();
             if (dr::any_or<true>(has_medium_trans)) {
                 dr::masked(medium, has_medium_trans) = si.target_medium(ray.d);
             }
-        }
-        return { transmittance * emitter_val, ds };
+        },
+        "Volpath integrator emitter sampling");
+
+        return { ls.transmittance * emitter_val, dir_sample };
     }
 
     //! @}

@@ -44,7 +44,6 @@ template <typename Float, typename Spectrum> struct MediumInteraction;
 template <typename Float, typename Spectrum> struct SurfaceInteraction;
 template <typename Float, typename Shape>    struct PreliminaryIntersection;
 
-
 template <typename Float_, typename Spectrum_> struct RenderAliases {
     using Float                     = Float_;
     using Spectrum                  = Spectrum_;
@@ -105,6 +104,7 @@ template <typename Float_, typename Spectrum_> struct RenderAliases {
     using MediumPtr              = dr::replace_scalar_t<Float, const Medium *>;
     using PhaseFunctionPtr       = dr::replace_scalar_t<Float, const PhaseFunction *>;
     using ShapePtr               = dr::replace_scalar_t<Float, const Shape *>;
+    using MeshPtr                = dr::replace_scalar_t<Float, const Mesh *>;
     using SensorPtr              = dr::replace_scalar_t<Float, const Sensor *>;
     using EmitterPtr             = dr::replace_scalar_t<Float, const Emitter *>;
 };
@@ -187,7 +187,9 @@ template <typename Float_, typename Spectrum_> struct RenderAliases {
     using ObjectPtr              = typename RenderAliases::ObjectPtr;                              \
     using BSDFPtr                = typename RenderAliases::BSDFPtr;                                \
     using MediumPtr              = typename RenderAliases::MediumPtr;                              \
+    using PhaseFunctionPtr       = typename RenderAliases::PhaseFunctionPtr;                       \
     using ShapePtr               = typename RenderAliases::ShapePtr;                               \
+    using MeshPtr                = typename RenderAliases::MeshPtr;                                \
     using EmitterPtr             = typename RenderAliases::EmitterPtr;                             \
     using SensorPtr              = typename RenderAliases::SensorPtr;
 

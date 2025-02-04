@@ -7,9 +7,14 @@
 NAMESPACE_BEGIN(mitsuba)
 
 MI_VARIANT BSDF<Float, Spectrum>::BSDF(const Properties &props)
-    : m_flags(+BSDFFlags::Empty), m_id(props.id()) { }
+    : m_flags(+BSDFFlags::Empty), m_id(props.id()) {
+    MI_REGISTRY_PUT("BSDF", this);
+}
 
-MI_VARIANT BSDF<Float, Spectrum>::~BSDF() { }
+MI_VARIANT BSDF<Float, Spectrum>::~BSDF() {
+    if constexpr (dr::is_jit_v<Float>)
+        jit_registry_remove(this);
+}
 
 MI_VARIANT std::pair<Spectrum, Float>
 BSDF<Float, Spectrum>::eval_pdf(const BSDFContext &ctx,

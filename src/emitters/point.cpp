@@ -82,7 +82,6 @@ public:
 
         m_needs_sample_3 = false;
         m_flags = +EmitterFlags::DeltaPosition;
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -143,7 +142,7 @@ public:
         si.wavelengths = it.wavelengths;
 
         UnpolarizedSpectrum spec =
-            m_intensity->eval(si, active) * dr::sqr(inv_dist);
+            m_intensity->eval(si, active) * dr::square(inv_dist);
 
         return { ds, depolarizer<Spectrum>(spec) };
     }

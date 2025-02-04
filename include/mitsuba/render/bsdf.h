@@ -2,7 +2,7 @@
 
 #include <mitsuba/core/profiler.h>
 #include <mitsuba/render/interaction.h>
-#include <drjit/vcall.h>
+#include <drjit/call.h>
 
 NAMESPACE_BEGIN(mitsuba)
 
@@ -266,6 +266,9 @@ template <typename Float, typename Spectrum>
 class MI_EXPORT_LIB BSDF : public Object {
 public:
     MI_IMPORT_TYPES(Texture)
+
+    /// Destructor
+    ~BSDF();
 
     /**
      * \brief Importance sample the BSDF model
@@ -592,12 +595,10 @@ public:
     //! @}
     // -----------------------------------------------------------------------
 
-    DRJIT_VCALL_REGISTER(Float, mitsuba::BSDF)
-
     MI_DECLARE_CLASS()
+
 protected:
     BSDF(const Properties &props);
-    virtual ~BSDF();
 
 protected:
     /// Combined flags for all components of this BSDF.
@@ -653,23 +654,23 @@ NAMESPACE_END(mitsuba)
 //! @{ \name Dr.Jit support for vectorized function calls
 // -----------------------------------------------------------------------
 
-DRJIT_VCALL_TEMPLATE_BEGIN(mitsuba::BSDF)
-    DRJIT_VCALL_METHOD(sample)
-    DRJIT_VCALL_METHOD(eval)
-    DRJIT_VCALL_METHOD(eval_null_transmission)
-    DRJIT_VCALL_METHOD(pdf)
-    DRJIT_VCALL_METHOD(eval_pdf)
-    DRJIT_VCALL_METHOD(eval_pdf_sample)
-    DRJIT_VCALL_METHOD(eval_diffuse_reflectance)
-    DRJIT_VCALL_METHOD(has_attribute)
-    DRJIT_VCALL_METHOD(eval_attribute)
-    DRJIT_VCALL_METHOD(eval_attribute_1)
-    DRJIT_VCALL_METHOD(eval_attribute_3)
-    DRJIT_VCALL_GETTER(flags, uint32_t)
+MI_CALL_TEMPLATE_BEGIN(BSDF)
+    DRJIT_CALL_METHOD(sample)
+    DRJIT_CALL_METHOD(eval)
+    DRJIT_CALL_METHOD(eval_null_transmission)
+    DRJIT_CALL_METHOD(pdf)
+    DRJIT_CALL_METHOD(eval_pdf)
+    DRJIT_CALL_METHOD(eval_pdf_sample)
+    DRJIT_CALL_METHOD(eval_diffuse_reflectance)
+    DRJIT_CALL_METHOD(has_attribute)
+    DRJIT_CALL_METHOD(eval_attribute)
+    DRJIT_CALL_METHOD(eval_attribute_1)
+    DRJIT_CALL_METHOD(eval_attribute_3)
+    DRJIT_CALL_GETTER(flags)
     auto needs_differentials() const {
         return has_flag(flags(), mitsuba::BSDFFlags::NeedsDifferentials);
     }
-DRJIT_VCALL_TEMPLATE_END(mitsuba::BSDF)
+MI_CALL_TEMPLATE_END(BSDF)
 
 //! @}
 // -----------------------------------------------------------------------

@@ -23,7 +23,7 @@ class BasicPRBIntegrator(RBIntegrator):
 
     Basic Path Replay Backpropagation-style integrator *without* next event
     estimation, multiple importance sampling, Russian Roulette, and
-    reparameterization. The lack of all of these features means that gradients
+    projective sampling. The lack of all of these features means that gradients
     are noisy and don't correctly account for visibility discontinuities. The
     lack of a Russian Roulette stopping criterion means that generated light
     paths may be unnecessarily long and costly to generate.
@@ -34,6 +34,10 @@ class BasicPRBIntegrator(RBIntegrator):
     ``prb.py`` for a more feature-complete Path Replay Backpropagation
     integrator, and ``prb_reparam.py`` for one that also handles visibility.
 
+    .. warning::
+        This integrator is not supported in variants which track polarization
+        states.
+
     .. tabs::
 
         .. code-tab:: python
@@ -43,6 +47,7 @@ class BasicPRBIntegrator(RBIntegrator):
 
     """
 
+    @dr.syntax
     def sample(self,
                mode: dr.ADMode,
                scene: mi.Scene,
@@ -74,11 +79,9 @@ class BasicPRBIntegrator(RBIntegrator):
         β = mi.Spectrum(1)                            # Path throughput weight
         active = mi.Bool(active)                      # Active SIMD lanes
 
-        # Record the following loop in its entirety
-        loop = mi.Loop(name="Path Replay Backpropagation (%s)" % mode.name,
-                       state=lambda: (sampler, ray, depth, L, δL, β, active))
-
-        while loop(active):
+        while dr.hint(active,
+                      max_iterations=self.max_depth,
+                      label="Path Replay Backpropagation (%s)" % mode.name):
             active_next = mi.Bool(active)
 
             # ---------------------- Direct emission ----------------------
@@ -91,7 +94,7 @@ class BasicPRBIntegrator(RBIntegrator):
 
             # Hide the environment emitter if necessary
             if self.hide_emitters:
-                active_next &= ~(dr.eq(depth, 0) & ~si.is_valid())
+                active_next &= ~((depth == 0) & ~si.is_valid())
 
             # Differentiable evaluation of intersected emitter / envmap
             with dr.resume_grad(when=not primal):
@@ -117,7 +120,7 @@ class BasicPRBIntegrator(RBIntegrator):
             β *= bsdf_weight
 
             # Don't run another iteration if the throughput has reached zero
-            active_next &= dr.any(dr.neq(β, 0))
+            active_next &= dr.any(β != 0)
 
             # ------------------ Differential phase only ------------------
 
@@ -130,14 +133,14 @@ class BasicPRBIntegrator(RBIntegrator):
                     # tracking enabled.
 
                     # Recompute 'wo' to propagate derivatives to cosine term
-                    wo = dr.detach(si.to_local(ray.d))
+                    wo = si.to_local(ray.d)
 
                     # Re-evaluate BSDF * cos(theta) differentiably
                     bsdf_val = bsdf.eval(bsdf_ctx, si, wo, active_next)
 
                     # Detached version of the above term and inverse
                     bsdf_val_detach = bsdf_weight * bsdf_sample.pdf
-                    inv_bsdf_val_detach = dr.select(dr.neq(bsdf_val_detach, 0),
+                    inv_bsdf_val_detach = dr.select(bsdf_val_detach != 0,
                                                     dr.rcp(bsdf_val_detach), 0)
 
                     # Differentiable version of the reflected radiance. Minor
@@ -159,9 +162,11 @@ class BasicPRBIntegrator(RBIntegrator):
 
         return (
             L if primal else δL, # Radiance/differential radiance
-            dr.neq(depth, 0),    # Ray validity flag for alpha blending
+            depth != 0,          # Ray validity flag for alpha blending
             [],                  # Empty typle of AOVs
             L                    # State the for differential phase
         )
 
 mi.register_integrator("prb_basic", lambda props: BasicPRBIntegrator(props))
+
+del RBIntegrator

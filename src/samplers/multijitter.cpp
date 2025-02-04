@@ -116,7 +116,7 @@ public:
         return new MultijitterSampler(*this);
     }
 
-    void seed(uint32_t seed, uint32_t wavefront_size) override {
+    void seed(UInt32 seed, uint32_t wavefront_size) override {
         Base::seed(seed, wavefront_size);
         m_permutation_seed = compute_per_sequence_seed(seed);
     }
@@ -168,6 +168,16 @@ public:
     void schedule_state() override {
         Base::schedule_state();
         dr::schedule(m_permutation_seed);
+    }
+
+    void traverse_1_cb_ro(void *payload, void (*fn)(void *, uint64_t)) const override {
+        auto fields = dr::make_tuple(m_rng, m_dimension_index, m_permutation_seed);
+        dr::traverse_1_fn_ro(fields, payload, fn);
+    }
+
+    void traverse_1_cb_rw(void *payload, uint64_t (*fn)(void *, uint64_t)) override {
+        auto fields = dr::tie(m_rng, m_dimension_index, m_permutation_seed);
+        dr::traverse_1_fn_rw(fields, payload, fn);
     }
 
     std::string to_string() const override {

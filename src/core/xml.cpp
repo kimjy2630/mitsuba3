@@ -189,7 +189,6 @@ struct XMLObject {
     size_t location = 0;
     ref<Object> object;
     std::mutex mutex;
-    uint32_t scope = 0;
 };
 
 enum class ColorMode {
@@ -350,7 +349,7 @@ void upgrade_tree(XMLSource &src, pugi::xml_node &node, const Version &version) 
             pugi::xml_node uscale  = n.select_node("float[@name='uscale']").node();
             pugi::xml_node vscale  = n.select_node("float[@name='vscale']").node();
 
-            Vector2f offset(0.f), scale(1.f);
+            Vector2f offset(0.0), scale(1.0);
             if (uoffset) {
                 offset.x() = string::stof<Float>(uoffset.attribute("value").value());
                 n.remove_child(uoffset);
@@ -371,13 +370,13 @@ void upgrade_tree(XMLSource &src, pugi::xml_node &node, const Version &version) 
             pugi::xml_node trafo = n.append_child("transform");
             trafo.append_attribute("name") = "to_uv";
 
-            if (offset != Vector2f(0.f)) {
+            if (dr::all(offset != Vector2f(0.0))) {
                 pugi::xml_node element = trafo.append_child("translate");
                 element.append_attribute("x") = std::to_string(offset.x()).c_str();
                 element.append_attribute("y") = std::to_string(offset.y()).c_str();
             }
 
-            if (scale != Vector2f(1.f)) {
+            if (dr::all(scale != Vector2f(1.0))) {
                 pugi::xml_node element = trafo.append_child("scale");
                 element.append_attribute("x") = std::to_string(scale.x()).c_str();
                 element.append_attribute("y") = std::to_string(scale.y()).c_str();
@@ -543,13 +542,6 @@ static std::pair<std::string, std::string> parse_xml(XMLSource &src, XMLParseCon
                     inst.class_ = it2->second;
                     inst.offset = src.offset;
                     inst.src_id = src.id;
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA)
-                    // Deterministically assign a scope to each scene object
-                    if (ctx.backend && ctx.parallel) {
-                        jit_new_scope((JitBackend) ctx.backend);
-                        inst.scope = jit_scope((JitBackend) ctx.backend);
-                    }
-#endif
                     inst.location = node.offset_debug();
                     return std::make_pair(name, id);
                 }
@@ -1026,8 +1018,6 @@ static Task *instantiate_node(XMLParseContext &ctx,
 
     Properties &props = inst.props;
     const auto &named_references = props.named_references();
-    uint32_t scope = inst.scope;
-
     // Recursive graph traversal to gather dependency tasks
     std::vector<Task *> deps;
     for (auto &kv : named_references) {
@@ -1038,6 +1028,15 @@ static Task *instantiate_node(XMLParseContext &ctx,
         }
         deps.push_back(task_map.find(child_id)->second);
     }
+
+    uint32_t scope = 0;
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA)
+    // Deterministically assign a scope to each scene object
+    if (ctx.backend && ctx.parallel) {
+        jit_new_scope((JitBackend) ctx.backend);
+        scope = jit_scope((JitBackend) ctx.backend);
+    }
+#endif
 
     auto instantiate = [&ctx, &env, id, scope]() {
         ScopedSetThreadEnvironment set_env(env);

@@ -175,9 +175,8 @@ public:
         m_alpha_v = distr.alpha_v();
 
         m_flags = BSDFFlags::GlossyReflection | BSDFFlags::DiffuseReflection;
-        if (m_alpha_u != m_alpha_v)
+        if (dr::all(m_alpha_u != m_alpha_v))
             m_flags = m_flags | BSDFFlags::Anisotropic;
-        dr::set_attr(this, "flags", m_flags);
         m_flags = m_flags | BSDFFlags::FrontSide;
 
         m_components.clear();
@@ -300,7 +299,7 @@ public:
                 Vector3f s_axis_out = dr::cross(H, wi_hat);
 
                 // Singularity when the input & output are collinear with the normal
-                Mask collinear = dr::all(dr::eq(s_axis_in, Vector3f(0)));
+                Mask collinear = dr::all(s_axis_in == Vector3f(0));
                 s_axis_in  = dr::select(collinear, Vector3f(1, 0, 0),
                                                    dr::normalize(s_axis_in));
                 s_axis_out = dr::select(collinear, Vector3f(1, 0, 0),
@@ -353,7 +352,7 @@ public:
                     // Arbitrarily pick a perpendicular direction if the
                     // reflection plane is ill-defined
                     Vector3f output_basis(basis);
-                    Mask collinear = dr::all(dr::eq(basis, Vector3f(0)));
+                    Mask collinear = dr::all(basis == Vector3f(0));
                     dr::masked(output_basis, collinear) = Vector3f(1, 0, 0);
                     return output_basis;
                 };

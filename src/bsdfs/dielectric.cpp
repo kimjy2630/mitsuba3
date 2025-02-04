@@ -232,7 +232,6 @@ public:
                                BSDFFlags::BackSide | BSDFFlags::NonSymmetric);
 
         m_flags = m_components[0] | m_components[1];
-        dr::set_attr(this, "flags", m_flags);
     }
 
     void traverse(TraversalCallback *callback) override {
@@ -319,7 +318,7 @@ public:
             Vector3f s_axis_out = dr::cross(n, wi_hat);
 
             // Singularity when the input & output are collinear with the normal
-            Mask collinear = dr::all(dr::eq(s_axis_in, Vector3f(0)));
+            Mask collinear = dr::all(s_axis_in == Vector3f(0));
             s_axis_in  = dr::select(collinear, Vector3f(1, 0, 0),
                                                dr::normalize(s_axis_in));
             s_axis_out = dr::select(collinear, Vector3f(1, 0, 0),
@@ -364,7 +363,7 @@ public:
             /* For transmission, radiance must be scaled to account for the solid
                angle compression that occurs when crossing the interface. */
             Float factor = (ctx.mode == TransportMode::Radiance) ? eta_ti : Float(1.f);
-            weight[selected_t] *= dr::sqr(factor);
+            weight[selected_t] *= dr::square(factor);
         }
 
         return { bs, weight & active };

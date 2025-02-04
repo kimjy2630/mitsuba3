@@ -16,12 +16,13 @@
 #include <mitsuba/python/python.h>
 
 
-#define PY_TRY_CAST(Type)                                         \
-    if (auto tmp = dynamic_cast<Type *>(o); tmp)                  \
-        return py::cast(tmp);
+#define PY_TRY_CAST(Type)                                                      \
+    if (Type* tmp = dynamic_cast<Type *>(o); tmp) {                            \
+            return nb::cast(tmp);                                              \
+    }
 
 /// Helper routine to cast Mitsuba plugins to their underlying interfaces
-static py::object caster(Object *o) {
+static nb::object caster(Object *o) {
     MI_PY_IMPORT_TYPES()
 
     // Try casting, starting from the most precise types
@@ -51,7 +52,7 @@ static py::object caster(Object *o) {
     PY_TRY_CAST(PhaseFunction);
     PY_TRY_CAST(Medium);
 
-    return py::object();
+    return nb::object();
 }
 
 // core
@@ -109,29 +110,26 @@ MI_PY_DECLARE(Scene);
 MI_PY_DECLARE(Sensor);
 MI_PY_DECLARE(SilhouetteSample);
 MI_PY_DECLARE(Shape);
-MI_PY_DECLARE(ShapeKDTree);
+//MI_PY_DECLARE(ShapeKDTree);
 MI_PY_DECLARE(srgb);
 MI_PY_DECLARE(Texture);
 MI_PY_DECLARE(Volume);
 MI_PY_DECLARE(VolumeGrid);
 
-#define MODULE_NAME MI_MODULE_NAME(mitsuba, MI_VARIANT_NAME)
-
-using Caster = py::object(*)(mitsuba::Object *);
+using Caster = nb::object(*)(mitsuba::Object *);
 Caster cast_object = nullptr;
 
-PYBIND11_MODULE(MODULE_NAME, m) {
-    // Temporarily change the module name (for pydoc)
-    m.attr("__name__") = "mitsuba." DRJIT_TOSTRING(MI_VARIANT_NAME);
-
-    MI_PY_IMPORT_TYPES()
+NB_MODULE(MI_VARIANT_NAME, m) {
+    m.attr("__name__") = "mitsuba";
 
     // Create sub-modules
-    py::module math    = create_submodule(m, "math"),
-               spline  = create_submodule(m, "spline"),
-               warp    = create_submodule(m, "warp"),
-               quad    = create_submodule(m, "quad"),
-               mueller = create_submodule(m, "mueller");
+    // Don't use nb::def_submodule because of namespace collisions
+    // create_submodule will always create a new module
+    nb::module_ math    = create_submodule(m, "math"),
+                spline  = create_submodule(m, "spline"),
+                warp    = create_submodule(m, "warp"),
+                quad    = create_submodule(m, "quad"),
+                mueller = create_submodule(m, "mueller");
 
     math.doc()    = "Mathematical routines, special functions, etc.";
     spline.doc()  = "Functions for evaluating and sampling Catmull-Rom splines";
@@ -140,17 +138,24 @@ PYBIND11_MODULE(MODULE_NAME, m) {
     quad.doc()    = "Functions for numerical quadrature";
     mueller.doc() = "Routines to manipulate Mueller matrices for polarized rendering.";
 
+    // FIXME: we don't really need a list of casters
+    /// Initialize the list of casters
+    nb::object mitsuba_ext = nb::module_::import_("mitsuba.mitsuba_ext");
+    cast_object = (Caster) (void *)((nb::capsule) mitsuba_ext.attr("cast_object")).data();
+
+    /// Register the variant-specific caster with the 'core_ext' module
+    auto casters = (std::vector<void *> *) ((nb::capsule)(mitsuba_ext.attr("casters"))).data();
+    casters->push_back((void *) caster);
+
+    MI_PY_IMPORT_TYPES()
+
     MI_PY_IMPORT(DrJit);
 
-    m.attr("float_dtype") = std::is_same_v<ScalarFloat, float> ? "f" : "d";
+    // TODO: Add documentation
     m.attr("is_monochromatic") = is_monochromatic_v<Spectrum>;
     m.attr("is_rgb") = is_rgb_v<Spectrum>;
     m.attr("is_spectral") = is_spectral_v<Spectrum>;
     m.attr("is_polarized") = is_polarized_v<Spectrum>;
-
-    color_management_static_initialization(dr::is_cuda_v<Float>,
-                                           dr::is_llvm_v<Float>);
-    Scene::static_accel_initialization();
 
     MI_PY_IMPORT(Object);
     MI_PY_IMPORT(Ray);
@@ -204,37 +209,41 @@ PYBIND11_MODULE(MODULE_NAME, m) {
     MI_PY_IMPORT(PhaseFunction);
     MI_PY_IMPORT(Sampler);
     MI_PY_IMPORT(Sensor);
-    MI_PY_IMPORT(ShapeKDTree);
+//    MI_PY_IMPORT(ShapeKDTree);
     MI_PY_IMPORT(srgb);
     MI_PY_IMPORT(Texture);
     MI_PY_IMPORT(Volume);
     MI_PY_IMPORT(VolumeGrid);
 
-    py::object mitsuba_ext = py::module::import("mitsuba.mitsuba_ext");
-    cast_object = (Caster) (void *)((py::capsule) mitsuba_ext.attr("cast_object"));
-
-    /// Register the variant-specific caster with the 'core_ext' module
-    auto casters = (std::vector<void *> *) (py::capsule)(mitsuba_ext.attr("casters"));
-    casters->push_back((void *) caster);
-
-    /* Register a cleanup callback function that is invoked when
-       the 'mitsuba::Scene' Python type is garbage collected */
-    py::cpp_function cleanup_callback(
-        [](py::handle weakref) {
-            color_management_static_shutdown();
-            Scene::static_accel_shutdown();
-
-            /* The DrJit python module is responsible for cleaning up the
-               JIT state, so jit_shutdown() shouldn't be called here. */
-            weakref.dec_ref();
+    /* Callback function cleanup static variant-specific data structures, this
+     * should be called when the interpreter is exiting */
+    auto atexit = nb::module_::import_("atexit");
+    atexit.attr("register")(nb::cpp_function([]() {
+        {
+            nb::gil_scoped_release g;
+            Thread::wait_for_tasks();
         }
-    );
+        color_management_static_shutdown();
+        Scene::static_accel_shutdown();
+    }));
 
-    (void) py::weakref(m.attr("Scene"), cleanup_callback).release();
+    /* Make this a package, thus allowing statements such as:
+     * `from mitsuba.scalar_rgb.test.util import function`
+     * For that we `__path__` needs to be populated. We do it by using the
+     * `__file__` attribute of a Python file which is located in the same
+     * directory as this module */
+    nb::module_ os = nb::module_::import_("os");
+    nb::module_ cfg = nb::module_::import_("mitsuba.config");
+    nb::object cfg_path = os.attr("path").attr("realpath")(cfg.attr("__file__"));
+    nb::object mi_dir = os.attr("path").attr("dirname")(cfg_path);
+    nb::object mi_py_dir = os.attr("path").attr("join")(mi_dir, "python");
+    nb::list paths{};
+    paths.append(nb::str(mi_dir));
+    paths.append(nb::str(mi_py_dir));
+    m.attr("__path__") = paths;
 
-    // Change module name back to correct value
-    m.attr("__name__") = "mitsuba." DRJIT_TOSTRING(MODULE_NAME);
+
+    color_management_static_initialization(dr::is_cuda_v<Float>,
+                                           dr::is_llvm_v<Float>);
+    Scene::static_accel_initialization();
 }
-
-#undef CHANGE_SUBMODULE_NAME
-#undef CHANGE_BACK_SUBMODULE_NAME

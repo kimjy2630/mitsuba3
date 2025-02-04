@@ -79,7 +79,7 @@ The following XML snippet showcases a simple example of a textured rectangle:
             'type': 'diffuse',
             'reflectance': {
                 'type': 'checkerboard',
-                'to_uv': mi.ScalarTransform4f.scale([5, 5, 1])
+                'to_uv': mi.ScalarTransform4f().scale([5, 5, 1])
             }
         }
 
@@ -103,10 +103,8 @@ public:
                 ScalarTransform4f::scale(ScalarVector3f(1.f, 1.f, -1.f));
 
         m_discontinuity_types = (uint32_t) DiscontinuityFlags::PerimeterType;
-        dr::set_attr(this, "silhouette_discontinuity_types", m_discontinuity_types);
 
         m_shape_type = ShapeType::Rectangle;
-        dr::set_attr(this, "shape_type", m_shape_type);
 
         update();
         initialize();
@@ -290,19 +288,19 @@ public:
         Bool done = false;
 
         // Clockwise rotation starting at bottom left corner
-        range = dr::eq(ss.uv.x(), 0.f);
+        range = (ss.uv.x() == 0.f);
         dr::masked(sample_x, range && !done) = ss.uv.y() * 0.25f + 0.00f;
         done |= range;
 
-        range = dr::eq(ss.uv.y(), 1.f);
+        range = (ss.uv.y() == 1.f);
         dr::masked(sample_x, range && !done) = ss.uv.x() * 0.25f + 0.25f;
         done |= range;
 
-        range = dr::eq(ss.uv.x(), 1.f);
+        range = (ss.uv.x() == 1.f);
         dr::masked(sample_x, range && !done) = (1.f - ss.uv.y()) * 0.25f + 0.50f;
         done |= range;
 
-        range = dr::eq(ss.uv.y(), 0.f);
+        range = (ss.uv.y() == 0.f);
         dr::masked(sample_x, range && !done) = (1.f - ss.uv.x()) * 0.25f + 0.75f;
 
         Point2f sample_yz = warp::uniform_sphere_to_square(ss.d);
@@ -376,7 +374,7 @@ public:
         ss.p = to_world.transform_affine(Point3f(local));
         ss.d            = dr::normalize(ss.p - viewpoint);
         ss.silhouette_d = dr::normalize(to_world.transform_affine(
-            Point3f(edge_dir.x(), edge_dir.y(), 0.f)));
+            Vector3f(edge_dir.x(), edge_dir.y(), 0.f)));
 
         Vector3f frame_t = dr::normalize(viewpoint - ss.p);
         Normal3f frame_n = dr::normalize(dr::cross(frame_t, ss.silhouette_d));
@@ -393,7 +391,7 @@ public:
 
     std::tuple<DynamicBuffer<UInt32>, DynamicBuffer<Float>>
     precompute_silhouette(const ScalarPoint3f & /*viewpoint*/) const override {
-        DynamicBuffer<UInt32> indices(DiscontinuityFlags::PerimeterType);
+        DynamicBuffer<UInt32> indices((uint32_t)DiscontinuityFlags::PerimeterType);
         DynamicBuffer<Float> weights(1.f);
 
         return {indices, weights};
@@ -412,19 +410,19 @@ public:
         Float sample_reuse(0.f);
 
         range = (sample < 0.25f);
-        si.uv[range] = Point2f(0.f, 0.f);
+        si.uv[range] = Point2f(0.f, 0.5f);
         dr::masked(sample_reuse, range) = sample * 4.f;
 
         range = (0.25f <= sample && sample < 0.50f);
-        si.uv[range] = Point2f(0.f, 1.f);
+        si.uv[range] = Point2f(0.5f, 1.f);
         dr::masked(sample_reuse, range) = (sample - 0.25f) * 4.f;
 
         range = (0.50f <= sample && sample < 0.75f);
-        si.uv[range] = Point2f(1.f, 1.f);
+        si.uv[range] = Point2f(1.f, 0.5f);
         dr::masked(sample_reuse, range) = (sample - 0.50f) * 4.f;
 
         range = (0.75f <= sample);
-        si.uv[range] = Point2f(1.f, 0.f);
+        si.uv[range] = Point2f(0.5f, 0.f);
         dr::masked(sample_reuse, range) = (sample - 0.75f) * 4.f;
 
         uint32_t flags = (uint32_t) DiscontinuityFlags::PerimeterType;
